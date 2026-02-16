@@ -1,0 +1,56 @@
+# --- macOS System Files ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# --- Python / FastAPI ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- uv (Python Package Manager) ---
+# We WANT to keep pyproject.toml and uv.lock, but NOT the environment
+.venv/
+.python-version
+
+# --- Environment & Secrets ---
+# Never commit your passwords or keys!
+.env
+.env.*
+!.env.example
+
+# --- IDEs (VS Code / PyCharm) ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Docker & Database ---
+# We ignore the local data folder so your DB doesn't get pushed to GitHub
+postgres_data/
+*.log
+docker-compose.override.yml
