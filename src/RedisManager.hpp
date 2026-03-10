@@ -12,7 +12,7 @@ class RedisManager
 public:
     // Takes a callback function so it knows how to broadcast to Crow's WebSockets
     RedisManager(std::function<void(const std::string &)> onMessageCallback)
-        : redis("tcp://127.0.0.1:6379"), callback(onMessageCallback)
+        : redis("tcp://redis:6379"), callback(onMessageCallback)
     {
         // Redis Subscriptions block the thread, so we run it in the background
         sub_thread = std::thread([this]()

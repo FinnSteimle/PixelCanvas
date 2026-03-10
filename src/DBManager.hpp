@@ -11,7 +11,7 @@ class DBManager
 {
 public:
     // Connection string points to the 'db' service defined in docker-compose
-    DBManager() : conn("host=127.0.0.1 port=5432 dbname=pixelcanvas user=user password=password")
+    DBManager() : conn("host=db port=5432 dbname=pixelcanvas user=user password=password")
     {
         if (conn.is_open())
         {
