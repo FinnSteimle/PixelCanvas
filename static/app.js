@@ -27,6 +27,16 @@ socket.onmessage = (event) => {
   drawPixel(msg.x, msg.y, msg.color);
 };
 
+fetch("/canvas")
+  .then((response) => response.json())
+  .then((data) => {
+    data.forEach((pixel) => {
+      drawPixel(pixel.x, pixel.y, pixel.color);
+    });
+    console.log("Canvas state loaded from PostgreSQL.");
+  })
+  .catch((err) => console.error("Could not load canvas:", err));
+
 canvas.addEventListener("mousedown", (e) => {
   const rect = canvas.getBoundingClientRect();
   const x = Math.floor((e.clientX - rect.left) / CELL_SIZE);

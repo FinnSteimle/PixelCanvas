@@ -18,6 +18,13 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/sewenew/redis-plus-plus.git
     GIT_TAG 1.3.10
 )
+
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
+)
+FetchContent_MakeAvailable(json)
+
 set(REDIS_PLUS_PLUS_BUILD_TEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(redis_pp)
 
@@ -33,6 +40,7 @@ target_link_libraries(pixel_server
     PRIVATE 
     Crow::Crow
     redis++
+    nlohmann_json::nlohmann_json
     ${PQXX_LIBRARIES}
 )
 

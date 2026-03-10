@@ -1,10 +1,14 @@
 #include "crow.h"
+#include "DBManager.hpp"
+#include <nlohmann/json.hpp>
+
 #include <fstream>
 #include <sstream>
 #include <unordered_set>
 #include <mutex>
 
 using namespace std;
+using json = nlohmann::json;
 
 mutex mtx;
 unordered_set<crow::websocket::connection *> users;
@@ -23,6 +27,7 @@ string read_file(const string &path)
 int main()
 {
     crow::SimpleApp app;
+    DBManager db;
 
     // Serve index.html
     CROW_ROUTE(app, "/")
@@ -59,12 +64,33 @@ int main()
                  {
             lock_guard<mutex> _(mtx);
             users.erase(&conn); })
-        .onmessage([&](crow::websocket::connection & /*conn*/, const string &data, bool is_binary)
-                   {
-            lock_guard<mutex> _(mtx);
-            for (auto u : users) {
-                u->send_text(data);
-            } });
+        .onmessage([&](crow::websocket::connection & /*conn*/, const string &data, bool is_binary) { // FIXED: Just [&]
+            try
+            {
+                auto msg = json::parse(data);
+                int x = msg["x"];
+                int y = msg["y"];
+                string color = msg["color"];
+
+                db.savePixel(x, y, color); // Saves to Postgres
+
+                lock_guard<mutex> _(mtx);
+                for (auto u : users)
+                    u->send_text(data); // Broadcasts to everyone
+            }
+            catch (const std::exception &e)
+            {
+                cout << "Error processing message: " << e.what() << endl;
+            }
+        });
+
+    // Get canvas from database
+    CROW_ROUTE(app, "/canvas")
+    ([&]()
+     { 
+        crow::response res(db.getFullCanvasJSON());
+        res.set_header("Content-Type", "application/json");
+        return res; });
 
     app.port(8080).multithreaded().run();
 }
