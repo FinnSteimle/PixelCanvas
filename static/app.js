@@ -1,44 +1,88 @@
+// --- CONFIGURATION ---
+const PIXEL_COUNT = 50;
+const CANVAS_SIZE = 500;
+const CELL_SIZE = CANVAS_SIZE / PIXEL_COUNT;
+
+// --- DOM ELEMENTS ---
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const colorPicker = document.getElementById("colorPicker");
 const status = document.getElementById("status");
+const authOverlay = document.getElementById("auth-overlay");
+const authStatus = document.getElementById("auth-status");
+const loginBtn = document.getElementById("loginBtn");
+const registerBtn = document.getElementById("registerBtn");
+const logoutBtn = document.getElementById("logoutBtn");
 
-const PIXEL_COUNT = 50;
-const CANVAS_SIZE = 500;
-const CELL_SIZE = CANVAS_SIZE / PIXEL_COUNT; // Each logical pixel is 10x10 real pixels
+let socket;
 
-// Draw a pixel on the canvas
+// --- CANVAS HELPERS ---
 function drawPixel(x, y, color) {
   ctx.fillStyle = color;
   ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
 }
 
-let socket; // Declare globally so the click listener can use it
+// --- AUTHENTICATION LOGIC ---
+async function performAuth(endpoint) {
+  const user = document.getElementById("username").value;
+  const pass = document.getElementById("password").value;
 
+  if (!user || !pass) {
+    authStatus.innerText = "Please fill all fields.";
+    return;
+  }
+
+  authStatus.style.color = "white";
+  authStatus.innerText =
+    endpoint === "login" ? "Logging in..." : "Registering...";
+
+  try {
+    const response = await fetch(`/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: user, password: pass }),
+    });
+
+    if (response.ok) {
+      if (endpoint === "login") {
+        const data = await response.json();
+        localStorage.setItem("pixel_token", data.token);
+        authOverlay.style.display = "none";
+        connectWebSocket();
+      } else {
+        authStatus.style.color = "lime";
+        authStatus.innerText = "Registered! Now please login.";
+      }
+    } else {
+      authStatus.style.color = "#ff5555";
+      authStatus.innerText =
+        endpoint === "login" ? "Invalid login" : "User already exists";
+    }
+  } catch (err) {
+    authStatus.innerText = "Server connection failed.";
+  }
+}
+
+// --- WEBSOCKET LOGIC ---
 function connectWebSocket() {
-  socket = new WebSocket(`ws://${window.location.host}/ws`);
+  const token = localStorage.getItem("pixel_token");
+  if (!token) return;
+
+  // We pass the token in the query string so the backend can verify it in .onopen
+  socket = new WebSocket(`ws://${window.location.host}/ws?token=${token}`);
 
   socket.onopen = () => {
     status.innerText = "● Online";
     status.style.color = "lime";
-    console.log("WebSocket Connected!");
 
-    // Every time we connect (or reconnect), fetch the latest state from DB
+    // Fetch full canvas state from the DB upon connection
     fetch("/canvas")
-      .then((response) => response.json())
+      .then((res) => res.json())
       .then((data) => {
-        // Wipe everything
-        ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-
-        // Fill the entire background with white
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
-        data.forEach((pixel) => {
-          drawPixel(pixel.x, pixel.y, pixel.color);
-        });
-        console.log("Canvas synced after connection.");
-      })
-      .catch((err) => console.error("Could not sync canvas:", err));
+        data.forEach((p) => drawPixel(p.x, p.y, p.color));
+      });
   };
 
   socket.onmessage = (event) => {
@@ -46,26 +90,34 @@ function connectWebSocket() {
     drawPixel(msg.x, msg.y, msg.color);
   };
 
-  socket.onclose = () => {
+  socket.onclose = (e) => {
     status.innerText = "● Offline - Reconnecting...";
     status.style.color = "orange";
-    console.warn("WebSocket dropped. Reconnecting in 2 seconds...");
-    // Auto-reconnect loop
-    setTimeout(connectWebSocket, 2000);
-  };
 
-  socket.onerror = (err) => {
-    console.error("WebSocket Error:", err);
-    socket.close(); // Force the close event to trigger the reconnect
+    // If the backend closes the connection due to token issues, force re-login
+    if (
+      e.reason.includes("Token") ||
+      e.reason.includes("Unauthorized") ||
+      e.code === 4001
+    ) {
+      localStorage.removeItem("pixel_token");
+      authOverlay.style.display = "flex";
+    } else {
+      setTimeout(connectWebSocket, 2000);
+    }
   };
 }
 
-// Start the connection immediately
-connectWebSocket();
+// --- EVENT LISTENERS ---
+loginBtn.onclick = () => performAuth("login");
+registerBtn.onclick = () => performAuth("register");
 
-// Handle user clicks
+logoutBtn.onclick = () => {
+  localStorage.removeItem("pixel_token");
+  location.reload();
+};
+
 canvas.addEventListener("mousedown", (e) => {
-  // Safety check: Only send if the socket is actually connected
   if (socket && socket.readyState === WebSocket.OPEN) {
     const rect = canvas.getBoundingClientRect();
     const x = Math.floor((e.clientX - rect.left) / CELL_SIZE);
@@ -76,9 +128,13 @@ canvas.addEventListener("mousedown", (e) => {
       y: y,
       color: colorPicker.value,
     };
-
     socket.send(JSON.stringify(payload));
-  } else {
-    console.warn("Wait for reconnection before drawing.");
   }
 });
+
+// --- INITIALIZATION ---
+// Check if the user is already logged in when the page loads
+if (localStorage.getItem("pixel_token")) {
+  authOverlay.style.display = "none";
+  connectWebSocket();
+}

@@ -6,14 +6,41 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <div id="auth-overlay">
+      <div class="auth-box">
+        <h2>PixelCanvas Login</h2>
+        <input type="text" id="username" placeholder="Username" />
+        <input type="password" id="password" placeholder="Password" />
+        <div class="auth-buttons">
+          <button id="loginBtn">Login</button>
+          <button id="registerBtn">Register</button>
+        </div>
+        <p id="auth-status"></p>
+      </div>
+    </div>
+
     <div id="ui">
       <h1>PixelCanvas 50x50</h1>
       <canvas id="canvas" width="500" height="500"></canvas>
       <div class="controls">
         <input type="color" id="colorPicker" value="#000000" />
         <span id="status">Connecting...</span>
+        <button
+          id="logoutBtn"
+          style="
+            margin-left: 10px;
+            background: #444;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+          "
+        >
+          Logout
+        </button>
       </div>
     </div>
+
     <script src="app.js"></script>
   </body>
 </html>

@@ -25,9 +25,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(json)
 
+FetchContent_Declare(
+    jwt-cpp
+    GIT_REPOSITORY https://github.com/Thalhammer/jwt-cpp.git
+    GIT_TAG v0.6.0
+)
+FetchContent_MakeAvailable(jwt-cpp)
+
 set(REDIS_PLUS_PLUS_BUILD_TEST OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(redis_pp)
 
+find_package(OpenSSL REQUIRED)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PQXX REQUIRED libpqxx)
@@ -41,8 +49,10 @@ target_link_libraries(pixel_server
     Crow::Crow
     redis++
     nlohmann_json::nlohmann_json
+    jwt-cpp::jwt-cpp
+    OpenSSL::Crypto
     ${PQXX_LIBRARIES}
 )
 
-# Tell the compiler where the pqxx headers are
-target_include_directories(pixel_server PRIVATE ${PQXX_INCLUDE_DIRS})
+# Tell the compiler where the headers are
+target_include_directories(pixel_server PRIVATE ${PQXX_INCLUDE_DIRS} ${OPENSSL_INCLUDE_DIR})

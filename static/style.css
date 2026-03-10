@@ -1,9 +1,12 @@
+/* General Layout */
 body {
   background: #1a1a1a;
   color: white;
-  font-family: "Segoe UI", sans-serif;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   display: flex;
   justify-content: center;
+  margin: 0;
+  overflow: hidden; /* Prevents scrollbars during login */
 }
 
 #ui {
@@ -14,9 +17,10 @@ body {
 canvas {
   border: 4px solid #333;
   background: #fff;
-  image-rendering: pixelated;
-  /* Keeps the pixels sharp when scaled */
+  image-rendering: pixelated; /* Keeps pixels sharp */
   cursor: crosshair;
+  display: block;
+  margin: 0 auto;
 }
 
 .controls {
@@ -25,4 +29,86 @@ canvas {
   gap: 15px;
   justify-content: center;
   align-items: center;
+}
+
+/* Auth Overlay Styles */
+#auth-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.auth-box {
+  background: #2a2a2a;
+  padding: 40px;
+  border: 2px solid #444;
+  border-radius: 12px;
+  text-align: center;
+  width: 300px;
+}
+
+.auth-box h2 {
+  margin-top: 0;
+  font-size: 1.5rem;
+  letter-spacing: 1px;
+}
+
+.auth-box input {
+  display: block;
+  width: 100%;
+  margin: 15px 0;
+  padding: 12px;
+  background: #111;
+  border: 1px solid #555;
+  color: white;
+  box-sizing: border-box;
+}
+
+.auth-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+#loginBtn {
+  background: #00ff00;
+  color: black;
+  font-weight: bold;
+  flex: 1;
+  padding: 12px;
+  cursor: pointer;
+  border: none;
+  transition: background 0.2s;
+}
+
+#loginBtn:hover {
+  background: #00cc00;
+}
+
+#registerBtn {
+  background: #444;
+  color: white;
+  flex: 1;
+  padding: 12px;
+  cursor: pointer;
+  border: none;
+}
+
+#auth-status {
+  color: #ff5555;
+  margin-top: 20px;
+  font-size: 0.9em;
+  min-height: 1.2em;
+}
+
+#status {
+  font-weight: bold;
+  font-family: monospace;
 }

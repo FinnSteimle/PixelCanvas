@@ -6,49 +6,63 @@
 #include <string>
 #include <thread>
 #include <functional>
+#include <chrono>
 
 class RedisManager
 {
 public:
-    // Takes a callback function so it knows how to broadcast to Crow's WebSockets
-    RedisManager(std::function<void(const std::string &)> onMessageCallback)
-        : redis("tcp://redis:6379"), callback(onMessageCallback)
+    // Initialize Redis using environment variables for the host
+    RedisManager() : redis(get_redis_url())
     {
-        // Redis Subscriptions block the thread, so we run it in the background
-        sub_thread = std::thread([this]()
-                                 {
-            auto sub = redis.subscriber();
-            
-            sub.on_message([this](std::string channel, std::string msg) {
-                if (channel == "canvas_updates") {
-                    callback(msg); // Trigger the broadcast to users
-                }
-            });
-            
-            sub.subscribe("canvas_updates");
-            std::cout << "Subscribed to Redis 'canvas_updates' channel." << std::endl;
-
-            while (true) {
-                try {
-                    sub.consume(); // Blocks until a message arrives
-                } catch (const sw::redis::Error& e) {
-                    std::cerr << "Redis Error: " << e.what() << std::endl;
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                }
-            } });
-
-        sub_thread.detach(); // Let the thread run independently
+        std::cout << "Connected to Redis at " << get_redis_url() << std::endl;
     }
 
-    void publish(const std::string &message)
+    // This matches the call in your updated main.cpp
+    void publishPixel(int x, int y, const std::string &color)
     {
-        redis.publish("canvas_updates", message);
+        nlohmann::json j;
+        j["x"] = x;
+        j["y"] = y;
+        j["color"] = color;
+        redis.publish("canvas_updates", j.dump());
+    }
+
+    // The subscription loop now runs in a dedicated method called by main.cpp
+    void subscribe(std::function<void(const std::string &, const std::string &)> callback)
+    {
+        std::thread([this, callback]()
+                    {
+            while (true) {
+                try {
+                    auto sub = redis.subscriber();
+                    
+                    sub.on_message([callback](std::string channel, std::string msg) {
+                        callback(channel, msg);
+                    });
+
+                    sub.subscribe("canvas_updates");
+                    std::cout << "Redis Subscriber active on 'canvas_updates'" << std::endl;
+
+                    while (true) {
+                        sub.consume(); // Blocks until message arrives
+                    }
+                } catch (const std::exception& e) {
+                    std::cerr << "Redis Sub Error: " << e.what() << ". Retrying in 2s..." << std::endl;
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                }
+            } })
+            .detach();
     }
 
 private:
     sw::redis::Redis redis;
-    std::thread sub_thread;
-    std::function<void(const std::string &)> callback;
+
+    // Helper to pull Redis host from environment (useful if you change the service name)
+    std::string get_redis_url()
+    {
+        const char *host = std::getenv("REDIS_HOST");
+        return "tcp://" + std::string(host ? host : "redis") + ":6379";
+    }
 };
 
 #endif

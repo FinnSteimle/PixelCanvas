@@ -1,104 +1,140 @@
 #include "crow.h"
 #include "DBManager.hpp"
 #include "RedisManager.hpp"
+#include <jwt-cpp/jwt.h>
 #include <nlohmann/json.hpp>
-
-#include <fstream>
+#include <openssl/sha.h>
+#include <iomanip>
 #include <sstream>
+#include <iostream>
 #include <unordered_set>
 #include <mutex>
 
 using namespace std;
 using json = nlohmann::json;
 
-mutex mtx;
-unordered_set<crow::websocket::connection *> users;
-
-string read_file(const string &path)
+// Professional SHA-256 hashing helper
+string hash_password(const string &password)
 {
-    ifstream f(path);
-    if (!f.is_open())
-        return "";
-    stringstream buffer;
-    buffer << f.rdbuf();
-    return buffer.str();
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    SHA256_Update(&sha256, password.c_str(), password.size());
+    SHA256_Final(hash, &sha256);
+
+    stringstream ss;
+    for (int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+    {
+        ss << hex << setw(2) << setfill('0') << (int)hash[i];
+    }
+    return ss.str();
 }
+
+// Global Secret (Pulled from .env via Docker)
+const char *env_secret = getenv("JWT_SECRET");
+const string JWT_SECRET = env_secret ? env_secret : "dev_fallback_secret_do_not_use_in_prod";
 
 int main(int argc, char *argv[])
 {
-    int port = 8080;
-    if (argc > 1)
-    {
-        port = std::stoi(argv[1]);
-    }
-
     crow::SimpleApp app;
     DBManager db;
+    RedisManager redis;
 
-    // Define how to broadcast to the users connected to THIS specific instance
-    auto broadcast_to_local_users = [](const string &data)
-    {
-        lock_guard<mutex> _(mtx);
-        for (auto u : users)
-        {
-            u->send_text(data);
-        }
-    };
+    mutex mtx;
+    unordered_set<crow::websocket::connection *> users;
 
-    // Initialize Redis and give it the broadcast function
-    RedisManager redis_mgr(broadcast_to_local_users);
+    // REGISTER: Hash password and store
+    CROW_ROUTE(app, "/register").methods(crow::HTTPMethod::POST)([&](const crow::request &req)
+                                                                 {
+        try {
+            auto data = json::parse(req.body);
+            string user = data["username"];
+            string pass = data["password"];
+            string hashed = hash_password(pass);
 
-    CROW_ROUTE(app, "/")
-    ([]()
-     {
-        string content = read_file("/workspaces/PixelCanvas/static/index.html");
-        if (content.empty()) return crow::response(404, "HTML File Not Found");
-        return crow::response(content); });
+            pqxx::work W(db.getConnection());
+            W.exec0("INSERT INTO users (username, password_hash) VALUES (" + 
+                   W.quote(user) + ", " + W.quote(hashed) + ");");
+            W.commit();
+            return crow::response(201, "User created");
+        } catch (...) {
+            return crow::response(409, "Registration failed");
+        } });
 
-    CROW_ROUTE(app, "/app.js")
-    ([]()
-     {
-        string content = read_file("/workspaces/PixelCanvas/static/app.js");
-        crow::response res(content);
-        res.set_header("Content-Type", "application/javascript");
-        return res; });
+    // LOGIN: Verify hash and return JWT
+    CROW_ROUTE(app, "/login").methods(crow::HTTPMethod::POST)([&](const crow::request &req)
+                                                              {
+        try {
+            auto data = json::parse(req.body);
+            string user = data["username"];
+            string pass = data["password"];
+            string hashed = hash_password(pass);
 
-    CROW_ROUTE(app, "/style.css")
-    ([]()
-     {
-        string content = read_file("/workspaces/PixelCanvas/static/style.css");
-        crow::response res(content);
-        res.set_header("Content-Type", "text/css");
-        return res; });
+            pqxx::nontransaction N(db.getConnection());
+            pqxx::result R = N.exec("SELECT id FROM users WHERE username = " + 
+                                    N.quote(user) + " AND password_hash = " + N.quote(hashed));
+            
+            if (R.empty()) return crow::response(401, "Invalid credentials");
 
-    CROW_ROUTE(app, "/ws").websocket(&app).onopen([&](crow::websocket::connection &conn)
-                                                  {
-            lock_guard<mutex> _(mtx);
-            users.insert(&conn); })
+            auto token = jwt::create()
+                .set_issuer("pixel_canvas")
+                .set_type("JWS")
+                .set_payload_claim("username", jwt::claim(user))
+                .set_expires_at(chrono::system_clock::now() + chrono::hours{24})
+                .sign(jwt::algorithm::hs256{JWT_SECRET});
+
+            json res;
+            res["token"] = token;
+            return crow::response(res.dump());
+        } catch (...) { return crow::response(500, "Server Error"); } });
+
+    // GET CANVAS: Uses corrected name from DBManager.hpp
+    CROW_ROUTE(app, "/canvas")([&]()
+                               { return crow::response(db.getFullCanvasJSON()); });
+
+    // WEBSOCKET (PROTECTED)
+    CROW_ROUTE(app, "/ws")
+        .websocket(&app)
+        .onaccept([&](const crow::request &req, void **userdata)
+                  {
+            auto token_ptr = req.url_params.get("token");
+            if (!token_ptr) return false; // Reject connection
+
+            try {
+                auto decoded = jwt::decode(std::string(token_ptr));
+                auto verifier = jwt::verify()
+                    .allow_algorithm(jwt::algorithm::hs256{JWT_SECRET})
+                    .with_issuer("pixel_canvas");
+                
+                verifier.verify(decoded);
+                return true; // Authorize and upgrade to WebSocket
+            } catch (...) {
+                return false; // Reject connection
+            } })
+        .onopen([&](crow::websocket::connection &conn)
+                {
+            std::lock_guard<std::mutex> _(mtx);
+            users.insert(&conn);
+            std::cout << "Authorized user connected!" << std::endl; })
         .onclose([&](crow::websocket::connection &conn, const string &reason)
                  {
-            lock_guard<mutex> _(mtx);
+            std::lock_guard<std::mutex> _(mtx);
             users.erase(&conn); })
-        .onmessage([&](crow::websocket::connection & /*conn*/, const string &data, bool is_binary)
+        .onmessage([&](crow::websocket::connection &conn, const string &data, bool is_binary)
                    {
             try {
                 auto msg = json::parse(data);
                 db.savePixel(msg["x"], msg["y"], msg["color"]);
-                
-                
-                redis_mgr.publish(data); 
+                redis.publishPixel(msg["x"], msg["y"], msg["color"]);
+            } catch (...) {} });
 
-            } catch (const std::exception& e) {
-                cout << "Error processing message: " << e.what() << endl;
-            } });
+    // Start Redis subscription loop
+    redis.subscribe([&](const string &channel, const string &message)
+                    {
+        lock_guard<mutex> _(mtx);
+        for (auto u : users) {
+            u->send_text(message);
+        } });
 
-    // Get canvas from database
-    CROW_ROUTE(app, "/canvas")
-    ([&]()
-     {
-        crow::response res(db.getFullCanvasJSON());
-        res.set_header("Content-Type", "application/json");
-        return res; });
-
-    app.port(port).multithreaded().run();
+    app.port(8080).multithreaded().run();
 }
