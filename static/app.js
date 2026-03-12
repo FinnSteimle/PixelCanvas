@@ -46,7 +46,9 @@ async function performAuth(endpoint) {
     if (response.ok) {
       if (endpoint === "login") {
         const data = await response.json();
-        localStorage.setItem("pixel_token", data.token);
+
+        sessionStorage.setItem("pixel_token", data.token);
+
         authOverlay.style.display = "none";
         connectWebSocket();
       } else {
@@ -65,7 +67,9 @@ async function performAuth(endpoint) {
 
 // --- WEBSOCKET LOGIC ---
 function connectWebSocket() {
-  const token = localStorage.getItem("pixel_token");
+
+  const token = sessionStorage.getItem("pixel_token");
+
   if (!token) return;
 
   // We pass the token in the query string so the backend can verify it in .onopen
@@ -100,7 +104,9 @@ function connectWebSocket() {
       e.reason.includes("Unauthorized") ||
       e.code === 4001
     ) {
-      localStorage.removeItem("pixel_token");
+
+      sessionStorage.removeItem("pixel_token");
+
       authOverlay.style.display = "flex";
     } else {
       setTimeout(connectWebSocket, 2000);
@@ -113,7 +119,9 @@ loginBtn.onclick = () => performAuth("login");
 registerBtn.onclick = () => performAuth("register");
 
 logoutBtn.onclick = () => {
-  localStorage.removeItem("pixel_token");
+
+  sessionStorage.removeItem("pixel_token");
+
   location.reload();
 };
 
@@ -134,7 +142,9 @@ canvas.addEventListener("mousedown", (e) => {
 
 // --- INITIALIZATION ---
 // Check if the user is already logged in when the page loads
-if (localStorage.getItem("pixel_token")) {
+
+if (sessionStorage.getItem("pixel_token")) {
+
   authOverlay.style.display = "none";
   connectWebSocket();
 }
