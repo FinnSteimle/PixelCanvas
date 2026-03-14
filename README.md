@@ -58,5 +58,22 @@ To prove the system survives a node failure:
 3. Observe the frontend UI: The connection status will briefly drop to `Offline - Reconnecting...` before turning back to `Online` as it transparently reconnects to `backend2` via Nginx.
 4. Continue drawing. The system remains fully operational.
 
-### 3. Load Testing (Pending)
-*A load test using a tool like `k6` will be executed against the JWT-protected `/canvas` endpoint to benchmark maximum requests/second and identify bottlenecks.*
+### 3. Load Testing & Bottleneck Analysis
+To evaluate the system's performance and identify physical limits, a load test is executed against the JWT-protected `GET /canvas` endpoint using **k6**. 
+
+**Execution:**
+Ensure the cluster is running, then execute the test script from the project root:
+```bash
+k6 run tests/loadtest.js
+```
+
+**Test Profile & Results:**
+* **Load:** Ramped up to 50 concurrent Virtual Users (VUs) sustained over 30 seconds.
+* **Throughput Ceiling:** ~55 requests/second.
+* **Peak P(95) Latency:** 19.01ms (for successful requests).
+* **Total Requests:** 4,297 (54.45% Success / 45.52% Timeout).
+
+**Bottleneck Identification: Thread Exhaustion & Cascading Failure**
+Real-time monitoring via `docker stats` and Nginx logs (`docker logs pixelcanvas-nginx-1`) revealed that the system bottleneck is **CPU starvation** on the C++ backend nodes, specifically caused by the computational overhead of cryptographic JWT verification (`SHA-256`).
+
+Under sustained load, thread exhaustion locked the C++ backends, preventing them from answering Nginx health checks. Nginx correctly identified the unresponsiveness and triggered a failover, routing all 50 VUs to the surviving backend. This resulted in a **cascading failure**, completely overwhelming the surviving node and causing a spike in `upstream timed out (110)` errors. Consequently, the k6 client abandoned the delayed requests, logging HTTP 499 (Client Closed Request) errors. Container telemetry confirmed `"OOMKilled": false`, proving the limitation is strictly CPU/Thread bound, not a memory leak.

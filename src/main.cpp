@@ -88,9 +88,25 @@ int main(int argc, char *argv[])
             return crow::response(res.dump());
         } catch (...) { return crow::response(500, "Server Error"); } });
 
-    // GET CANVAS: Uses corrected name from DBManager.hpp
-    CROW_ROUTE(app, "/canvas")([&]()
-                               { return crow::response(db.getFullCanvasJSON()); });
+    CROW_ROUTE(app, "/canvas").methods(crow::HTTPMethod::GET)([&](const crow::request &req)
+                                                              {
+    auto auth_header = req.get_header_value("Authorization");
+    if (auth_header.empty() || auth_header.substr(0, 7) != "Bearer ") {
+        return crow::response(401, "Missing or invalid token");
+    }
+
+    string token = auth_header.substr(7);
+    try {
+        auto decoded = jwt::decode(token);
+        auto verifier = jwt::verify()
+            .allow_algorithm(jwt::algorithm::hs256{JWT_SECRET})
+            .with_issuer("pixel_canvas");
+        
+        verifier.verify(decoded);
+        return crow::response(db.getFullCanvasJSON());
+    } catch (...) {
+        return crow::response(401, "Invalid token");
+    } });
 
     // WEBSOCKET (PROTECTED)
     CROW_ROUTE(app, "/ws")

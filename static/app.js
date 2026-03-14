@@ -76,7 +76,8 @@ function connectWebSocket() {
     status.style.color = "lime";
 
     // Fetch full canvas state from the DB upon connection
-    fetch("/canvas")
+    fetch("/canvas", {
+  headers: { "Authorization": `Bearer ${token}` }})
       .then((res) => res.json())
       .then((data) => {
         ctx.fillStyle = "#FFFFFF";
