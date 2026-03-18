@@ -12,13 +12,11 @@ class DBManager
 public:
     DBManager()
     {
-        // Pull credentials from .env
         const char *user = std::getenv("DB_USER");
         const char *pass = std::getenv("DB_PASS");
         const char *name = std::getenv("DB_NAME");
         const char *host = std::getenv("DB_HOST");
 
-        // Build connection string with fallbacks for safety
         std::string conn_str =
             "host=" + std::string(host ? host : "db") +
             " user=" + std::string(user ? user : "user") +
@@ -30,28 +28,26 @@ public:
             conn = std::make_unique<pqxx::connection>(conn_str);
             if (conn->is_open())
             {
-                std::cout << "Connected to PostgreSQL via Environment Credentials." << std::endl;
+                std::cout << "Connected to PostgreSQL." << std::endl;
             }
         }
         catch (const std::exception &e)
         {
-            std::cerr << "CRITICAL DB ERROR: " << e.what() << std::endl;
+            std::cerr << "DB Error: " << e.what() << std::endl;
         }
     }
 
-    // REQUIRED FOR JWT: Let main.cpp use the connection for Login/Register
     pqxx::connection &getConnection()
     {
         return *conn;
     }
 
-    // Saves a single pixel (UPSERT)
     void savePixel(int x, int y, const std::string &color)
     {
         try
         {
             pqxx::work W(*conn);
-            W.exec0("INSERT INTO canvas (x, y, color) VALUES (" +
+            W.exec("INSERT INTO canvas (x, y, color) VALUES (" +
                     W.quote(x) + ", " + W.quote(y) + ", " + W.quote(color) +
                     ") ON CONFLICT (x, y) DO UPDATE SET color = EXCLUDED.color;");
             W.commit();
@@ -62,7 +58,6 @@ public:
         }
     }
 
-    // Returns the current state for initial load or reconnect sync
     std::string getFullCanvasJSON()
     {
         try
@@ -84,7 +79,6 @@ public:
     }
 
 private:
-    // Use unique_ptr to handle the connection lifecycle cleanly
     std::unique_ptr<pqxx::connection> conn;
 };
 

@@ -78,8 +78,8 @@ canvas {
 }
 
 #loginBtn {
-  background: #00ff00;
-  color: black;
+  background: #0056b3;
+  color: white;
   font-weight: bold;
   flex: 1;
   padding: 12px;
@@ -89,7 +89,7 @@ canvas {
 }
 
 #loginBtn:hover {
-  background: #00cc00;
+  background: #004494;
 }
 
 #registerBtn {
