@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/devcontainers/cpp:1-ubuntu-22.04
+FROM mcr.microsoft.com/devcontainers/cpp:1-ubuntu-24.04
 
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get -y install --no-install-recommends \
@@ -10,10 +10,10 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     libhiredis-dev \
     libasio-dev \
     libssl-dev \
+    libsodium-dev \
     gpg \
     ca-certificates
 
-# Install k6 load testing tool for benchmarking the system from within the container
 RUN apt-get update && apt-get install -y curl tar \
     && curl -L https://github.com/grafana/k6/releases/download/v0.50.0/k6-v0.50.0-linux-amd64.tar.gz -o k6.tar.gz \
     && tar -xzf k6.tar.gz \

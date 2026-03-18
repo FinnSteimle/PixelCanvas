@@ -1,3 +1,5 @@
+// --- src/main.cpp ---
+
 #include "crow.h"
 #include "DBManager.hpp"
 #include "RedisManager.hpp"
@@ -67,22 +69,39 @@ int main(int argc, char *argv[])
      */
     CROW_ROUTE(app, "/register").methods(crow::HTTPMethod::POST)([&](const crow::request &req)
     {
+        // Acquire a thread-safe connection from the pool
+        auto conn = db.get_connection();
+        
+        // Health check: instantly reject if DB is unreachable
+        if (!conn || !conn->is_open()) {
+            return crow::response(502, "Database unavailable");
+        }
+
         try {
             auto data = json::parse(req.body);
             string user = data["username"];
             string pass = data["password"];
             string hashed = hash_password(pass);
 
-            pqxx::work W(db.getConnection());
+            // Strict RAII Scoping: The transaction begins here.
+            pqxx::work W(*conn);
             W.exec("INSERT INTO users (username, password_hash) VALUES (" + 
                    W.quote(user) + ", " + W.quote(hashed) + ");");
             W.commit();
+            
+            // Success: Safely return the connection to the pool
+            db.return_connection(std::move(conn));
             return crow::response(201, "User created");
+
+        } catch (const pqxx::broken_connection &e) {
+            // FATAL: Connection died mid-transaction. Let the unique_ptr destroy it (Poison Control).
+            std::cerr << "Registration Broken Conn: " << e.what() << std::endl;
+            return crow::response(502, "Database connection lost");
+
         } catch (const std::exception &e) {
+            // NON-FATAL: e.g., Username already exists. The pqxx::work object auto-rolls back here.
             std::cerr << "Registration Error: " << e.what() << std::endl;
-            return crow::response(409, "Registration failed");
-        } catch (...) {
-            std::cerr << "Registration Error: Unknown exception" << std::endl;
+            db.return_connection(std::move(conn));
             return crow::response(409, "Registration failed");
         }
     });
@@ -93,15 +112,21 @@ int main(int argc, char *argv[])
      */
     CROW_ROUTE(app, "/login").methods(crow::HTTPMethod::POST)([&](const crow::request &req)
     {
+        auto conn = db.get_connection();
+        if (!conn || !conn->is_open()) {
+            return crow::response(502, "Database unavailable");
+        }
+
         try {
             auto data = json::parse(req.body);
             string user = data["username"];
             string pass = data["password"];
 
-            pqxx::nontransaction N(db.getConnection());
+            pqxx::nontransaction N(*conn);
             pqxx::result R = N.exec("SELECT password_hash FROM users WHERE username = " + N.quote(user));
             
             if (R.empty() || !verify_password(R[0][0].as<string>(), pass)) {
+                db.return_connection(std::move(conn));
                 return crow::response(401, "Invalid credentials");
             }
 
@@ -115,12 +140,17 @@ int main(int argc, char *argv[])
 
             json res;
             res["token"] = token;
+            
+            db.return_connection(std::move(conn));
             return crow::response(res.dump());
+
+        } catch (const pqxx::broken_connection &e) { 
+            std::cerr << "Login Broken Conn: " << e.what() << std::endl;
+            return crow::response(502, "Database connection lost"); 
+
         } catch (const std::exception &e) { 
             std::cerr << "Login Error: " << e.what() << std::endl;
-            return crow::response(500, "Server Error"); 
-        } catch (...) { 
-            std::cerr << "Login Error: Unknown exception" << std::endl;
+            db.return_connection(std::move(conn));
             return crow::response(500, "Server Error"); 
         }
     });
