@@ -56,7 +56,11 @@ int main(int argc, char *argv[])
                    W.quote(user) + ", " + W.quote(hashed) + ");");
             W.commit();
             return crow::response(201, "User created");
+        } catch (const std::exception &e) {
+            std::cerr << "Registration Error: " << e.what() << std::endl;
+            return crow::response(409, "Registration failed");
         } catch (...) {
+            std::cerr << "Registration Error: Unknown exception" << std::endl;
             return crow::response(409, "Registration failed");
         }
     });
@@ -85,7 +89,11 @@ int main(int argc, char *argv[])
             json res;
             res["token"] = token;
             return crow::response(res.dump());
+        } catch (const std::exception &e) { 
+            std::cerr << "Login Error: " << e.what() << std::endl;
+            return crow::response(500, "Server Error"); 
         } catch (...) { 
+            std::cerr << "Login Error: Unknown exception" << std::endl;
             return crow::response(500, "Server Error"); 
         }
     });

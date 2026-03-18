@@ -22,11 +22,22 @@ export function setup() {
     headers: { "Content-Type": "application/json" },
   };
 
-  http.post(`${BASE_URL}/register`, payload, params);
+  const regRes = http.post(`${BASE_URL}/register`, payload, params);
+  if (regRes.status !== 200 && regRes.status !== 201) {
+    console.error(`Registration Failed: ${regRes.status} - ${regRes.body}`);
+  }
 
   const loginRes = http.post(`${BASE_URL}/login`, payload, params);
+  if (loginRes.status !== 200) {
+    console.error(`Login Failed: ${loginRes.status} - ${loginRes.body}`);
+  }
 
-  return { token: loginRes.json("token") };
+  const token = loginRes.json("token");
+  if (!token) {
+    throw new Error("Setup failed: No token received. Aborting test.");
+  }
+
+  return { token: token };
 }
 
 export default function (data) {
