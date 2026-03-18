@@ -1,5 +1,3 @@
-// --- src/DBManager.hpp ---
-
 #ifndef DBMANAGER_HPP
 #define DBMANAGER_HPP
 
@@ -10,6 +8,8 @@
 #include <memory>
 #include <queue>
 #include <mutex>
+#include <thread>
+#include <chrono> 
 
 /**
  * Manages a thread-safe connection pool to the PostgreSQL database.
@@ -83,31 +83,44 @@ public:
     }
 
     /**
-     * Persists a pixel change to the database using an ephemeral connection.
-     * Uses UPSERT logic (ON CONFLICT) to update color if coordinates exist.
-     * @param x X-coordinate of the pixel.
-     * @param y Y-coordinate of the pixel.
-     * @param color Hex color string of the pixel.
+     * Persists a pixel change to the database.
+     * Updated with a retry loop to prevent data loss during DB restarts.
      */
     void savePixel(int x, int y, const std::string &color)
     {
-        auto conn = get_connection();
-        if (!conn || !conn->is_open()) return;
+        const int max_retries = 3;
+        
+        for (int attempt = 1; attempt <= max_retries; ++attempt) {
+            auto conn = get_connection();
+            
+            // If DB is down, wait 100ms and try again
+            if (!conn || !conn->is_open()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                continue;
+            }
 
-        try {
-            pqxx::work W(*conn);
-            W.exec("INSERT INTO canvas (x, y, color) VALUES (" +
-                    W.quote(x) + ", " + W.quote(y) + ", " + W.quote(color) +
-                    ") ON CONFLICT (x, y) DO UPDATE SET color = EXCLUDED.color;");
-            W.commit();
-            return_connection(std::move(conn));
-        } catch (const pqxx::broken_connection& e) {
-            // Connection severed. Let it drop to avoid poisoning the pool.
-            std::cerr << "savePixel DB drop: " << e.what() << std::endl;
-        } catch (...) {
-            // Non-fatal error. Return healthy connection to pool.
-            return_connection(std::move(conn));
+            try {
+                pqxx::work W(*conn);
+                W.exec("INSERT INTO canvas (x, y, color) VALUES (" +
+                        W.quote(x) + ", " + W.quote(y) + ", " + W.quote(color) +
+                        ") ON CONFLICT (x, y) DO UPDATE SET color = EXCLUDED.color;");
+                W.commit();
+                
+                return_connection(std::move(conn));
+                return; // Pixel saved successfully
+                
+            } catch (const pqxx::broken_connection& e) {
+                // Connection died mid-query. Drop the bad connection and retry.
+                std::cerr << "DB connection lost, retrying pixel save (" << attempt << "/" << max_retries << ")\n";
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            } catch (const std::exception& e) {
+                // Non-connection error (SQL syntax, etc.) - return connection and stop
+                std::cerr << "SQL Error in savePixel: " << e.what() << std::endl;
+                return_connection(std::move(conn));
+                return;
+            }
         }
+        std::cerr << "Critical: Pixel update lost after " << max_retries << " failed attempts.\n";
     }
 
     /**
@@ -133,12 +146,8 @@ public:
             return_connection(std::move(conn));
             return j.dump(); // Convert JSON object to string for transmission
             
-        } catch (const pqxx::broken_connection& e) {
-            std::cerr << "getFullCanvasJSON DB drop: " << e.what() << std::endl;
-            return "[]";
         } catch (...) {
-            return_connection(std::move(conn));
-            return "[]";
+            return "[]"; // Return empty array on failure
         }
     }
 

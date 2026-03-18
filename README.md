@@ -70,7 +70,8 @@ k6 run tests/loadtest.js
 * **Load:** Ramped up to 50 concurrent Virtual Users (VUs) sustained over 50 seconds.
 * **Peak Throughput:** ~370 requests/second.
 * **Average Latency:** ~7ms.
-* **Total Requests:** ~18,500 requests per run, achieving a flawless **100.00% success rate** under maximum stress.
+* **Peak P(95) Latency:** 11.8ms to 13.87ms.
+* **Total Requests:** ~18,500+ requests per run, achieving a flawless **100.00% success rate** under maximum stress.
 
 **Architectural Resolution: Thread-Safe Connection Pools & Poison Control**
 Initial load testing revealed a critical vulnerability: under extreme CPU starvation (caused by the overhead of cryptographic Argon2id and JWT verification), the C++ backend containers would crash. While Docker successfully restarted the containers, a **cascading database failure** occurred due to "Connection Pool Poisoning." Crashed instances left dirty, uncommitted transactions (`pqxx::work`) hanging, which the newly rebooted instances tried to reuse, resulting in 500 and 409 errors.
@@ -80,4 +81,4 @@ To achieve true fault tolerance, the backend architecture was upgraded to includ
 2. **Strict RAII Transaction Scoping:** Guarantees automatic PostgreSQL transaction rollbacks if a C++ thread crashes mid-request.
 3. **Poison Control (Fail-Fast Validation):** Explicitly catches `pqxx::broken_connection` exceptions and permanently drops dead sockets instead of returning them to the pool.
 
-**Conclusion:** Following these implementations, the system gracefully handles the sudden death and restart of nodes under high load, successfully serving over 55,000 requests across consecutive load tests without a single dropped connection or failed database query.
+**Conclusion:** Following these implementations, the system gracefully handles the sudden death and restart of nodes under high load, successfully serving 55,719 requests across three consecutive load tests without a single dropped connection or failed database query.
