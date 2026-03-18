@@ -12,6 +12,13 @@
 using namespace std;
 using json = nlohmann::json;
 
+// --- PASSWORD SECURITY ---
+
+/**
+ * Generates a secure hash for a password using libsodium.
+ * @param password The plain-text password to hash.
+ * @return A string containing the hashed password and salt.
+ */
 string hash_password(const string &password)
 {
     char hashed[crypto_pwhash_STRBYTES];
@@ -24,25 +31,40 @@ string hash_password(const string &password)
     return string(hashed);
 }
 
+/**
+ * Verifies a password against a previously generated hash.
+ * @param hashed The hashed password string.
+ * @param password The plain-text password to verify.
+ * @return True if the password matches the hash, false otherwise.
+ */
 bool verify_password(const string &hashed, const string &password)
 {
     return crypto_pwhash_str_verify(hashed.c_str(), password.c_str(), password.length()) == 0;
 }
 
+// Load JWT secret from environment variable or use a fallback for development
 const char *env_secret = getenv("JWT_SECRET");
 const string JWT_SECRET = env_secret ? env_secret : "dev_fallback_secret_do_not_use_in_prod";
 
 int main(int argc, char *argv[])
 {
+    // Initialize libsodium for secure password hashing
     if (sodium_init() < 0) return 1;
 
     crow::SimpleApp app;
     DBManager db;
     RedisManager redis;
 
+    // Track active WebSocket connections for broadcasting updates
     mutex mtx;
     unordered_set<crow::websocket::connection *> users;
 
+    // --- REST ENDPOINTS ---
+
+    /**
+     * Endpoint for new user registration.
+     * Hashes the password and stores the username and hash in PostgreSQL.
+     */
     CROW_ROUTE(app, "/register").methods(crow::HTTPMethod::POST)([&](const crow::request &req)
     {
         try {
@@ -65,6 +87,10 @@ int main(int argc, char *argv[])
         }
     });
 
+    /**
+     * Endpoint for user login.
+     * Verifies credentials and returns a JWT if authentication is successful.
+     */
     CROW_ROUTE(app, "/login").methods(crow::HTTPMethod::POST)([&](const crow::request &req)
     {
         try {
@@ -79,6 +105,7 @@ int main(int argc, char *argv[])
                 return crow::response(401, "Invalid credentials");
             }
 
+            // Create a signed JWT valid for 24 hours
             auto token = jwt::create()
                 .set_issuer("pixel_canvas")
                 .set_type("JWS")
@@ -98,6 +125,10 @@ int main(int argc, char *argv[])
         }
     });
 
+    /**
+     * Endpoint to retrieve the current state of the canvas.
+     * Requires a valid JWT in the Authorization header.
+     */
     CROW_ROUTE(app, "/canvas").methods(crow::HTTPMethod::GET)([&](const crow::request &req)
     {
         auto auth_header = req.get_header_value("Authorization");
@@ -107,6 +138,7 @@ int main(int argc, char *argv[])
 
         string token = auth_header.substr(7);
         try {
+            // Verify the JWT before allowing access
             auto decoded = jwt::decode(token);
             auto verifier = jwt::verify()
                 .allow_algorithm(jwt::algorithm::hs256{JWT_SECRET})
@@ -119,10 +151,17 @@ int main(int argc, char *argv[])
         } 
     });
 
+    // --- WEBSOCKET HANDLER ---
+
+    /**
+     * WebSocket endpoint for real-time pixel updates.
+     * Validates JWT token in query parameters upon connection.
+     */
     CROW_ROUTE(app, "/ws")
         .websocket(&app)
         .onaccept([&](const crow::request &req, void **userdata)
         {
+            // Extract and verify token from query parameters
             auto token_ptr = req.url_params.get("token");
             if (!token_ptr) return false;
 
@@ -140,23 +179,34 @@ int main(int argc, char *argv[])
         })
         .onopen([&](crow::websocket::connection &conn)
         {
+            // Add new connection to the active users set
             std::lock_guard<std::mutex> _(mtx);
             users.insert(&conn);
         })
         .onclose([&](crow::websocket::connection &conn, const string &reason, uint16_t status)
         {
+            // Remove connection from active users set
             std::lock_guard<std::mutex> _(mtx);
             users.erase(&conn);
         })
         .onmessage([&](crow::websocket::connection &conn, const string &data, bool is_binary)
         {
+            // Handle incoming pixel updates from clients
             try {
                 auto msg = json::parse(data);
+                // Save the pixel change to the database
                 db.savePixel(msg["x"], msg["y"], msg["color"]);
+                // Broadcast the change via Redis for other backend instances
                 redis.publishPixel(msg["x"], msg["y"], msg["color"]);
             } catch (...) {}
         });
 
+    // --- REDIS SYNCHRONIZATION ---
+
+    /**
+     * Listens for pixel updates broadcasted by other backend instances via Redis.
+     * Forwards these updates to all connected local clients via WebSocket.
+     */
     redis.subscribe([&](const string &channel, const string &message)
     {
         lock_guard<mutex> _(mtx);
@@ -165,5 +215,6 @@ int main(int argc, char *argv[])
         }
     });
 
+    // Start the Crow application on port 8080 in multi-threaded mode
     app.port(8080).multithreaded().run();
 }

@@ -13,6 +13,7 @@
         }
     },
     "remoteUser": "vscode",
+    // Enable Docker-in-Docker support to run compose from within the dev container
     "features": {
         "ghcr.io/devcontainers/features/docker-in-docker:2": {}
     },

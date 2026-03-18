@@ -2,28 +2,43 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>PixelCanvas</title>
+    <title>PixelCanvas - Distributed DS Task</title>
+    <!-- Link to the external CSS for styling the UI and auth components -->
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <!-- 
+      Authentication Overlay: 
+      Visible when the user is not logged in. Handles Login and Registration. 
+    -->
     <div id="auth-overlay">
       <div class="auth-box">
         <h2>PixelCanvas Login</h2>
+        <!-- Input fields for authentication -->
         <input type="text" id="username" placeholder="Username" />
         <input type="password" id="password" placeholder="Password" />
         <div class="auth-buttons">
           <button id="loginBtn">Login</button>
           <button id="registerBtn">Register</button>
         </div>
+        <!-- Placeholder for error or status messages -->
         <p id="auth-status"></p>
       </div>
     </div>
 
+    <!-- 
+      Main Application UI: 
+      Contains the canvas grid and various interaction controls. 
+    -->
     <div id="ui">
       <h1>PixelCanvas 50x50</h1>
+      <!-- The main drawing surface -->
       <canvas id="canvas" width="500" height="500"></canvas>
+      
+      <!-- User controls for interacting with the canvas -->
       <div class="controls">
         <input type="color" id="colorPicker" value="#000000" />
+        <!-- Real-time connection status (Online/Offline) -->
         <span id="status">Connecting...</span>
         <button
           id="logoutBtn"
@@ -41,6 +56,7 @@
       </div>
     </div>
 
+    <!-- Main JavaScript application logic -->
     <script src="app.js"></script>
   </body>
 </html>

@@ -1,9 +1,7 @@
 # PixelCanvas: Distributed Collaborative Canvas
-
 PixelCanvas is a fault-tolerant, real-time, distributed clone of r/place. It allows multiple users to paint simultaneously on a shared 50x50 grid. The system is designed to survive the sudden failure of backend nodes without data loss or service interruption, meeting all requirements for the Distributed Systems Challenge Task.
 
 ## Features & Requirement Mapping
-
 * **Distributed System:** Runs multiple C++ backend instances behind an Nginx load balancer.
 * **Fault Tolerance:** If a backend node is terminated, Nginx routes traffic to the surviving node, and clients automatically reconnect their WebSockets.
 * **JWT Authentication:** Users must register and log in via REST endpoints. The resulting JWT is strictly required to open a WebSocket connection.
@@ -12,7 +10,6 @@ PixelCanvas is a fault-tolerant, real-time, distributed clone of r/place. It all
 * **Single-Command Deployment:** The entire stack, including database seeding, builds and starts via a single Docker Compose command.
 
 ## Architecture Stack
-
 * **Frontend:** HTML5 Canvas, Vanilla JS, CSS (Served directly by Nginx)
 * **Backend:** Modern C++ (C++17) using the Crow microframework
 * **Database:** PostgreSQL 15 (via `libpqxx`)
@@ -20,12 +17,10 @@ PixelCanvas is a fault-tolerant, real-time, distributed clone of r/place. It all
 * **Infrastructure:** Docker, Docker Compose, Nginx (Reverse Proxy & Load Balancer)
 
 ## Prerequisites
-
 * Docker and Docker Compose installed.
 * Port `8080` available on your local machine.
 
 ## Quick Start
-
 1. **Configure Secrets:**
    Copy the example environment file and set your secure credentials.
    ```bash
@@ -73,7 +68,9 @@ k6 run tests/loadtest.js
 * **Peak P(95) Latency:** 8.51ms to 11.29ms for successful requests.
 * **Total Requests:** Up to 19,073 requests per run, achieving an 82.65% to 99.89% success rate under maximum stress.
 
-**Bottleneck Identification: Graceful Degradation & Thread Exhaustion**
-Real-time monitoring via `docker stats` and Nginx logs revealed that the system bottleneck is **CPU starvation** on the C++ backend nodes, caused by the computational overhead of cryptographic JWT verification (`SHA-256`).
+**Bottleneck Identification: Thread Exhaustion & Connection Pool Poisoning**
+Real-time monitoring via `docker stats` and Nginx logs revealed that the primary physical limit of the system is **CPU starvation** on the C++ backend nodes, caused by the heavy computational overhead of cryptographic JWT verification.
 
-Under sustained extreme load, thread exhaustion occurs as the backend processes thousands of cryptographic validations. However, the architecture is designed to **degrade gracefully**. Instead of crashing the C++ containers or triggering a cascading database lockup, the system processes the vast majority of requests flawlessly while safely dropping the excess requests that exceed thread capacity (returning timeouts). Container telemetry confirms `"OOMKilled": false`, proving the limitation is strictly CPU/Thread bound, not a memory leak.
+Under sustained extreme load, thread exhaustion causes the backend containers to lock up and eventually crash. While the infrastructure successfully demonstrates fault tolerance by automatically restarting the dead containers via Docker, the load test exposed a critical flaw in the recovery phase: **Database Connection Pool Poisoning**. 
+
+When a C++ backend crashes mid-request, active PostgreSQL transactions (`pqxx::work`) are severed ungracefully. When the node restarts and is immediately flooded with traffic by Nginx, the `libpqxx` connection pool attempts to reuse these "dirty" connections or attempts to connect before Postgres has finished its own crash recovery. This results in a cascading failure of `500 Server Error` (broken pipes) and `409 Conflict` (hanging transactions) responses. 

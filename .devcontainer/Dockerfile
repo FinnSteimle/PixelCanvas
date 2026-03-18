@@ -13,7 +13,7 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     gpg \
     ca-certificates
 
-# Install k6 for load tests
+# Install k6 load testing tool for benchmarking the system from within the container
 RUN apt-get update && apt-get install -y curl tar \
     && curl -L https://github.com/grafana/k6/releases/download/v0.50.0/k6-v0.50.0-linux-amd64.tar.gz -o k6.tar.gz \
     && tar -xzf k6.tar.gz \

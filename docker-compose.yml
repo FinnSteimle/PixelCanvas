@@ -1,8 +1,10 @@
+# Docker Compose configuration for the PixelCanvas distributed system
 services:
+  # PostgreSQL database for persistent storage of user accounts and canvas state
   db:
     image: postgres:18
     volumes:
-      - ./init-db:/docker-entrypoint-initdb.d
+      - ./init-db:/docker-entrypoint-initdb.d # Seed the database with initial schema
     environment:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -15,6 +17,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # Redis for real-time pub/sub synchronization between backend instances
   redis:
     image: redis:8.6
     ports:
@@ -25,6 +28,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # Primary C++ backend instance
   backend1:
     build:
       context: .
@@ -42,6 +46,7 @@ services:
         condition: service_healthy
     restart: always
 
+  # Secondary C++ backend instance for high availability and load balancing
   backend2:
     build:
       context: .
@@ -59,13 +64,14 @@ services:
         condition: service_healthy
     restart: always
 
+  # Nginx reverse proxy and load balancer to distribute traffic across backends
   nginx:
     image: nginx:1.28.2-alpine
     ports:
       - "8080:80"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./static:/usr/share/nginx/html:ro
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro # Mount custom Nginx config
+      - ./static:/usr/share/nginx/html:ro           # Serve static frontend assets
     depends_on:
       - backend1
       - backend2

@@ -1,4 +1,4 @@
-/* General Layout */
+/* General Layout and Typography */
 body {
   background: #1a1a1a;
   color: white;
@@ -9,20 +9,23 @@ body {
   overflow: hidden; /* Prevents scrollbars during login */
 }
 
+/* Container for the main canvas UI */
 #ui {
   text-align: center;
   margin-top: 50px;
 }
 
+/* Canvas styling: ensures pixels are crisp and not blurred */
 canvas {
   border: 4px solid #333;
   background: #fff;
-  image-rendering: pixelated; /* Keeps pixels sharp */
+  image-rendering: pixelated; /* Keeps individual pixels sharp when scaled */
   cursor: crosshair;
   display: block;
   margin: 0 auto;
 }
 
+/* Controls section: color picker, status indicator, and logout */
 .controls {
   margin-top: 20px;
   display: flex;
@@ -31,7 +34,7 @@ canvas {
   align-items: center;
 }
 
-/* Auth Overlay Styles */
+/* Full-screen overlay for user authentication (Login/Register) */
 #auth-overlay {
   position: fixed;
   top: 0;
@@ -45,6 +48,7 @@ canvas {
   z-index: 1000;
 }
 
+/* The centered box inside the authentication overlay */
 .auth-box {
   background: #2a2a2a;
   padding: 40px;
@@ -60,6 +64,7 @@ canvas {
   letter-spacing: 1px;
 }
 
+/* Input styling for username and password fields */
 .auth-box input {
   display: block;
   width: 100%;
@@ -71,12 +76,14 @@ canvas {
   box-sizing: border-box;
 }
 
+/* Flexbox layout for login and register buttons */
 .auth-buttons {
   display: flex;
   gap: 10px;
   margin-top: 20px;
 }
 
+/* Primary action button styling */
 #loginBtn {
   background: #0056b3;
   color: white;
@@ -92,6 +99,7 @@ canvas {
   background: #004494;
 }
 
+/* Secondary action button styling */
 #registerBtn {
   background: #444;
   color: white;
@@ -101,6 +109,7 @@ canvas {
   border: none;
 }
 
+/* Error or status message text in the auth box */
 #auth-status {
   color: #ff5555;
   margin-top: 20px;
@@ -108,6 +117,7 @@ canvas {
   min-height: 1.2em;
 }
 
+/* Status indicator text (Online/Offline) */
 #status {
   font-weight: bold;
   font-family: monospace;
