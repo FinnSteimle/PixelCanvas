@@ -49,7 +49,12 @@ pkg_check_modules(PQXX REQUIRED libpqxx) # libpqxx for PostgreSQL interaction
 pkg_check_modules(SODIUM REQUIRED libsodium) # libsodium for password hashing
 
 # --- TARGET CONFIGURATION ---
-add_executable(pixel_server src/main.cpp)
+# Updated to include new implementation files
+add_executable(pixel_server 
+    src/main.cpp 
+    src/DBManager.cpp 
+    src/RedisManager.cpp
+)
 
 # Link all dependencies to the main executable
 target_link_libraries(pixel_server 
