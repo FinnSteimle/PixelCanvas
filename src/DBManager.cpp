@@ -3,6 +3,9 @@
 #include <iostream>
 #include <thread>
 #include <chrono>
+#include <format>
+
+using namespace std::chrono_literals;
 
 DBManager::DBManager(int pool_size)
 {
@@ -11,11 +14,12 @@ DBManager::DBManager(int pool_size)
     const char *name = std::getenv("DB_NAME");
     const char *host = std::getenv("DB_HOST");
 
-    // Format connection string for libpqxx
-    conn_str = "host=" + std::string(host ? host : "db") +
-               " user=" + std::string(user ? user : "user") +
-               " password=" + std::string(pass ? pass : "password") +
-               " dbname=" + std::string(name ? name : "pixelcanvas");
+    // Format connection string for libpqxx using C++20 std::format
+    conn_str = std::format("host={} user={} password={} dbname={}",
+                           host ? host : "db",
+                           user ? user : "user",
+                           pass ? pass : "password",
+                           name ? name : "pixelcanvas");
 
     for (int i = 0; i < pool_size; ++i) {
         try {
@@ -24,10 +28,10 @@ DBManager::DBManager(int pool_size)
                 pool.push(std::move(conn));
             }
         } catch (const std::exception &e) {
-            std::cerr << "DB Pool Init Error: " << e.what() << std::endl;
+            std::cerr << std::format("DB Pool Init Error: {}\n", e.what());
         }
     }
-    std::cout << "DB Pool initialized with " << pool.size() << " connections." << std::endl;
+    std::cout << std::format("DB Pool initialized with {} connections.\n", pool.size());
 }
 
 std::unique_ptr<pqxx::connection> DBManager::get_connection()
@@ -54,24 +58,29 @@ void DBManager::return_connection(std::unique_ptr<pqxx::connection> conn)
     // If conn is broken/null, it automatically goes out of scope here and is destroyed safely.
 }
 
-void DBManager::savePixel(int x, int y, const std::string &color)
+void DBManager::savePixel(int x, int y, std::string_view color)
 {
-    const int max_retries = 3;
+    constexpr int max_retries = 3;
     
     for (int attempt = 1; attempt <= max_retries; ++attempt) {
         auto conn = get_connection();
         
         // If DB is down, wait 100ms and try again
         if (!conn || !conn->is_open()) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(100ms);
             continue;
         }
 
         try {
             pqxx::work W(*conn);
-            W.exec("INSERT INTO canvas (x, y, color) VALUES (" +
-                    W.quote(x) + ", " + W.quote(y) + ", " + W.quote(color) +
-                    ") ON CONFLICT (x, y) DO UPDATE SET color = EXCLUDED.color;");
+            
+            std::string query = std::format(
+                "INSERT INTO canvas (x, y, color) VALUES ({}, {}, {}) "
+                "ON CONFLICT (x, y) DO UPDATE SET color = EXCLUDED.color;",
+                W.quote(x), W.quote(y), W.quote(color)
+            );
+            
+            W.exec(query);
             W.commit();
             
             return_connection(std::move(conn));
@@ -79,16 +88,16 @@ void DBManager::savePixel(int x, int y, const std::string &color)
             
         } catch (const pqxx::broken_connection& e) {
             // Connection died mid-query. Drop the bad connection and retry.
-            std::cerr << "DB connection lost, retrying pixel save (" << attempt << "/" << max_retries << ")\n";
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::cerr << std::format("DB connection lost, retrying pixel save ({}/{})\n", attempt, max_retries);
+            std::this_thread::sleep_for(100ms);
         } catch (const std::exception& e) {
             // Non-connection error (SQL syntax, etc.) - return connection and stop
-            std::cerr << "SQL Error in savePixel: " << e.what() << std::endl;
+            std::cerr << std::format("SQL Error in savePixel: {}\n", e.what());
             return_connection(std::move(conn));
             return;
         }
     }
-    std::cerr << "Critical: Pixel update lost after " << max_retries << " failed attempts.\n";
+    std::cerr << std::format("Critical: Pixel update lost after {} failed attempts.\n", max_retries);
 }
 
 std::string DBManager::getFullCanvasJSON()
@@ -102,9 +111,13 @@ std::string DBManager::getFullCanvasJSON()
         pqxx::result R = N.exec("SELECT x, y, color FROM canvas ORDER BY y, x;");
 
         nlohmann::json j = nlohmann::json::array();
-        for (auto row : R) {
+        for (const auto& row : R) {
             // Push each database row into the JSON array
-            j.push_back({{"x", row[0].as<int>()}, {"y", row[1].as<int>()}, {"color", row[2].as<std::string>()}});
+            j.push_back({
+                {"x", row[0].as<int>()}, 
+                {"y", row[1].as<int>()}, 
+                {"color", row[2].as<std::string>()}
+            });
         }
         
         return_connection(std::move(conn));

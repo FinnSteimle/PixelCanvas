@@ -1,4 +1,5 @@
 import http from "k6/http";
+import ws from "k6/ws";
 import { check, sleep } from "k6";
 
 /**
@@ -7,13 +8,14 @@ import { check, sleep } from "k6";
  */
 export const options = {
   stages: [
-    { duration: "10s", target: 50 }, // Ramp up to 50 VUs over 10 seconds
-    { duration: "30s", target: 50 }, // Sustain 50 VUs for 30 seconds
-    { duration: "10s", target: 0 },  // Ramp down to 0 VUs over 10 seconds
+    { duration: "10s", target: 500 },
+    { duration: "30s", target: 500 },
+    { duration: "10s", target: 0 },
   ],
 };
 
 const BASE_URL = "http://localhost:8080";
+const WS_URL = "ws://localhost:8080/ws";
 
 /**
  * Setup function: Executed once before the main test loop.
@@ -33,28 +35,21 @@ export function setup() {
 
   // 1. Register a new user
   const regRes = http.post(`${BASE_URL}/register`, payload, params);
-  if (regRes.status !== 200 && regRes.status !== 201) {
-    console.error(`Registration Failed: ${regRes.status} - ${regRes.body}`);
-  }
 
   // 2. Login to get the JWT token
   const loginRes = http.post(`${BASE_URL}/login`, payload, params);
-  if (loginRes.status !== 200) {
-    console.error(`Login Failed: ${loginRes.status} - ${loginRes.body}`);
-  }
-
   const token = loginRes.json("token");
+
   if (!token) {
     throw new Error("Setup failed: No token received. Aborting test.");
   }
 
-  // Pass the token to all VUs
   return { token: token };
 }
 
 /**
  * Main execution loop for each virtual user.
- * Repeatedly fetches the current canvas state using the JWT.
+ * Fetches the canvas and opens a WebSocket connection to simulate pixel activity.
  * @param {object} data The setup data (contains the token).
  */
 export default function (data) {
@@ -65,11 +60,28 @@ export default function (data) {
     },
   });
 
-  // Verify that the response status is 200 OK
   check(res, {
-    "is status 200": (r) => r.status === 200,
+    "status is 200": (r) => r.status === 200,
   });
 
-  // Short pause between requests to simulate user behavior
+  // Simulate WebSocket pixel activity
+  const url = `${WS_URL}?token=${data.token}`;
+
+  ws.connect(url, {}, function (socket) {
+    socket.on("open", function () {
+      // Simulate a user "drawing" a pixel
+      socket.send(JSON.stringify({
+        x: Math.floor(Math.random() * 50),
+        y: Math.floor(Math.random() * 50),
+        color: "#FF0000"
+      }));
+
+      // Close after a brief period of listening for updates
+      socket.setTimeout(function () {
+        socket.close();
+      }, 500);
+    });
+  });
+
   sleep(0.1);
 }

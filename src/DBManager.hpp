@@ -6,6 +6,7 @@
 #include <memory>
 #include <queue>
 #include <mutex>
+#include <string_view>
 
 /**
  * Manages a thread-safe connection pool to the PostgreSQL database.
@@ -38,7 +39,7 @@ public:
      * Persists a pixel change to the database.
      * Updated with a retry loop to prevent data loss during DB restarts.
      */
-    void savePixel(int x, int y, const std::string &color);
+    void savePixel(int x, int y, std::string_view color);
 
     /**
      * Retrieves the entire current state of the 50x50 canvas.

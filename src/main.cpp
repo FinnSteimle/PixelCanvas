@@ -1,5 +1,3 @@
-// --- src/main.cpp ---
-
 #include "crow.h"
 #include "DBManager.hpp"
 #include "RedisManager.hpp"
@@ -10,6 +8,8 @@
 #include <unordered_set>
 #include <mutex>
 #include <string>
+#include <format>
+#include <chrono>
 
 using namespace std;
 using json = nlohmann::json;
@@ -85,8 +85,10 @@ int main(int argc, char *argv[])
 
             // Strict RAII Scoping: The transaction begins here.
             pqxx::work W(*conn);
-            W.exec("INSERT INTO users (username, password_hash) VALUES (" + 
-                   W.quote(user) + ", " + W.quote(hashed) + ");");
+            
+            string query = format("INSERT INTO users (username, password_hash) VALUES ({}, {});", 
+                                  W.quote(user), W.quote(hashed));
+            W.exec(query);
             W.commit();
             
             // Success: Safely return the connection to the pool
@@ -95,12 +97,12 @@ int main(int argc, char *argv[])
 
         } catch (const pqxx::broken_connection &e) {
             // FATAL: Connection died mid-transaction. Let the unique_ptr destroy it (Poison Control).
-            std::cerr << "Registration Broken Conn: " << e.what() << std::endl;
+            cerr << format("Registration Broken Conn: {}\n", e.what());
             return crow::response(502, "Database connection lost");
 
         } catch (const std::exception &e) {
             // NON-FATAL: e.g., Username already exists. The pqxx::work object auto-rolls back here.
-            std::cerr << "Registration Error: " << e.what() << std::endl;
+            cerr << format("Registration Error: {}\n", e.what());
             db.return_connection(std::move(conn));
             return crow::response(409, "Registration failed");
         }
@@ -123,7 +125,8 @@ int main(int argc, char *argv[])
             string pass = data["password"];
 
             pqxx::nontransaction N(*conn);
-            pqxx::result R = N.exec("SELECT password_hash FROM users WHERE username = " + N.quote(user));
+            string query = format("SELECT password_hash FROM users WHERE username = {}", N.quote(user));
+            pqxx::result R = N.exec(query);
             
             if (R.empty() || !verify_password(R[0][0].as<string>(), pass)) {
                 db.return_connection(std::move(conn));
@@ -135,7 +138,7 @@ int main(int argc, char *argv[])
                 .set_issuer("pixel_canvas")
                 .set_type("JWS")
                 .set_payload_claim("username", jwt::claim(user))
-                .set_expires_at(chrono::system_clock::now() + chrono::hours{24})
+                .set_expires_at(chrono::system_clock::now() + chrono::days{1})
                 .sign(jwt::algorithm::hs256{JWT_SECRET});
 
             json res;
@@ -145,11 +148,11 @@ int main(int argc, char *argv[])
             return crow::response(res.dump());
 
         } catch (const pqxx::broken_connection &e) { 
-            std::cerr << "Login Broken Conn: " << e.what() << std::endl;
+            cerr << format("Login Broken Conn: {}\n", e.what());
             return crow::response(502, "Database connection lost"); 
 
         } catch (const std::exception &e) { 
-            std::cerr << "Login Error: " << e.what() << std::endl;
+            cerr << format("Login Error: {}\n", e.what());
             db.return_connection(std::move(conn));
             return crow::response(500, "Server Error"); 
         }
@@ -162,7 +165,7 @@ int main(int argc, char *argv[])
     CROW_ROUTE(app, "/canvas").methods(crow::HTTPMethod::GET)([&](const crow::request &req)
     {
         auto auth_header = req.get_header_value("Authorization");
-        if (auth_header.empty() || auth_header.substr(0, 7) != "Bearer ") {
+        if (!auth_header.starts_with("Bearer ")) {
             return crow::response(401, "Missing or invalid token");
         }
 
@@ -224,10 +227,13 @@ int main(int argc, char *argv[])
             // Handle incoming pixel updates from clients
             try {
                 auto msg = json::parse(data);
+                
+                std::string color = msg["color"]; 
+
                 // Save the pixel change to the database
-                db.savePixel(msg["x"], msg["y"], msg["color"]);
+                db.savePixel(msg["x"], msg["y"], color);
                 // Broadcast the change via Redis for other backend instances
-                redis.publishPixel(msg["x"], msg["y"], msg["color"]);
+                redis.publishPixel(msg["x"], msg["y"], color);
             } catch (...) {}
         });
 

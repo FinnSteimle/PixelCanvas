@@ -3,6 +3,8 @@ services:
   # PostgreSQL database for persistent storage of user accounts and canvas state
   db:
     image: postgres:18
+    # Increased connections and memory buffers to handle high-concurrency pixel writes
+    command: [ "postgres", "-c", "max_connections=3000", "-c", "shared_buffers=512MB" ]
     volumes:
       - ./init-db:/docker-entrypoint-initdb.d # Seed the database with initial schema
     environment:
@@ -39,6 +41,11 @@ services:
       - DB_PASS=${POSTGRES_PASSWORD}
       - DB_NAME=${POSTGRES_DB}
       - DB_HOST=${DB_HOST}
+      - REDIS_HOST=redis # Connects to the redis service by its network alias
+    ulimits:
+      nofile:
+        soft: 30000
+        hard: 30000
     depends_on:
       db:
         condition: service_healthy
@@ -57,6 +64,11 @@ services:
       - DB_PASS=${POSTGRES_PASSWORD}
       - DB_NAME=${POSTGRES_DB}
       - DB_HOST=${DB_HOST}
+      - REDIS_HOST=redis # Ensures both instances point to the same message broker
+    ulimits:
+      nofile:
+        soft: 30000
+        hard: 30000
     depends_on:
       db:
         condition: service_healthy
@@ -69,9 +81,13 @@ services:
     image: nginx:1.28.2-alpine
     ports:
       - "8080:80"
+    ulimits:
+      nofile:
+        soft: 30000
+        hard: 30000
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro # Mount custom Nginx config
-      - ./static:/usr/share/nginx/html:ro           # Serve static frontend assets
+      - ./static:/usr/share/nginx/html:ro # Serve static frontend assets
     depends_on:
       - backend1
       - backend2
