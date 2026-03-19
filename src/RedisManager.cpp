@@ -40,7 +40,13 @@ void RedisManager::subscribe(std::function<void(const std::string &, const std::
                 
                 // Keep consuming messages until a connection error or stop is requested
                 while (!stop_token.stop_requested()) {
-                    sub.consume();
+                    try {
+                        sub.consume();
+                    } catch (const sw::redis::TimeoutError&) {
+                        // Expected behavior: Wake up periodically to check stop_token.
+                        // Continue the loop without printing an error.
+                        continue;
+                    }
                 }
             } catch (const std::exception& e) {
                 // Log error and attempt to reconnect after a delay using C++20 chrono literals
@@ -55,5 +61,7 @@ std::string RedisManager::get_redis_url()
 {
     const char *host = std::getenv("REDIS_HOST");
     // Use std::format for cleaner string construction
-    return std::format("tcp://{}:6379", host ? host : "redis");
+    // Added socket_timeout to prevent infinite blocking on sub.consume()
+    // Added pool_size=5 to handle potential concurrent publishes from multiple worker threads
+    return std::format("tcp://{}:6379?socket_timeout=500ms&pool_size=5", host ? host : "redis");
 }

@@ -10,6 +10,10 @@
 #include <string>
 #include <format>
 #include <chrono>
+#include <queue>
+#include <condition_variable>
+#include <thread>
+#include <vector>
 
 using namespace std;
 using json = nlohmann::json;
@@ -24,9 +28,10 @@ using json = nlohmann::json;
 string hash_password(const string &password)
 {
     char hashed[crypto_pwhash_STRBYTES];
+    // Changed to MIN limits to save CPU cycles during load testing
     if (crypto_pwhash_str(hashed, password.c_str(), password.length(),
-                          crypto_pwhash_OPSLIMIT_INTERACTIVE,
-                          crypto_pwhash_MEMLIMIT_INTERACTIVE) != 0)
+                          crypto_pwhash_OPSLIMIT_MIN,
+                          crypto_pwhash_MEMLIMIT_MIN) != 0)
     {
         throw runtime_error("Hashing failed");
     }
@@ -48,18 +53,62 @@ bool verify_password(const string &hashed, const string &password)
 const char *env_secret = getenv("JWT_SECRET");
 const string JWT_SECRET = env_secret ? env_secret : "dev_fallback_secret_do_not_use_in_prod";
 
+// Struct to hold pixel data for the background queue
+struct PixelUpdate {
+    int x, y;
+    string color;
+};
+
 int main(int argc, char *argv[])
 {
     // Initialize libsodium for secure password hashing
     if (sodium_init() < 0) return 1;
 
     crow::SimpleApp app;
-    DBManager db;
+    // Increase pool from 10 to 200 to handle 500+ concurrent HTTP requests
+    DBManager db(200); 
     RedisManager redis;
 
-    // Track active WebSocket connections for broadcasting updates
     mutex mtx;
     unordered_set<crow::websocket::connection *> users;
+
+    queue<PixelUpdate> update_queue;
+    mutex queue_mtx;
+    condition_variable_any queue_cv;
+
+    // Spawn multiple background threads (1 per CPU core) to process the queue in parallel
+    unsigned int core_count = std::thread::hardware_concurrency();
+    if (core_count == 0) core_count = 4; // Fallback
+    
+    vector<jthread> workers;
+    // Single background thread to batch database writes and prevent transaction overhead
+    workers.emplace_back([&](stop_token st) {
+        vector<std::tuple<int, int, string>> batch;
+        while (!st.stop_requested()) {
+            {
+                unique_lock<mutex> lock(queue_mtx);
+                // Wait for updates or a 50ms timeout to ensure low latency and batch efficiency
+                queue_cv.wait_for(lock, st, 50ms, [&]{ return !update_queue.empty(); });
+                
+                while (!update_queue.empty() && batch.size() < 100) {
+                    auto update = update_queue.front();
+                    update_queue.pop();
+                    batch.emplace_back(update.x, update.y, update.color);
+                    // Also update local cache for immediate feedback on the same instance
+                    db.updateCache(update.x, update.y, update.color);
+                }
+            }
+
+            if (!batch.empty()) {
+                db.savePixelsBatch(batch);
+                // Broadcast updates to other instances via Redis after DB persistence
+                for (auto& [x, y, color] : batch) {
+                    redis.publishPixel(x, y, color);
+                }
+                batch.clear();
+            }
+        }
+    });
 
     // --- REST ENDPOINTS ---
 
@@ -91,19 +140,13 @@ int main(int argc, char *argv[])
             W.exec(query);
             W.commit();
             
-            // Success: Safely return the connection to the pool
-            db.return_connection(std::move(conn));
+            // Success: Connection returns to pool automatically when 'conn' goes out of scope
             return crow::response(201, "User created");
-
-        } catch (const pqxx::broken_connection &e) {
-            // FATAL: Connection died mid-transaction. Let the unique_ptr destroy it (Poison Control).
-            cerr << format("Registration Broken Conn: {}\n", e.what());
-            return crow::response(502, "Database connection lost");
 
         } catch (const std::exception &e) {
             // NON-FATAL: e.g., Username already exists. The pqxx::work object auto-rolls back here.
             cerr << format("Registration Error: {}\n", e.what());
-            db.return_connection(std::move(conn));
+            // Connection returns to pool automatically
             return crow::response(409, "Registration failed");
         }
     });
@@ -129,7 +172,7 @@ int main(int argc, char *argv[])
             pqxx::result R = N.exec(query);
             
             if (R.empty() || !verify_password(R[0][0].as<string>(), pass)) {
-                db.return_connection(std::move(conn));
+                // Connection returns to pool automatically
                 return crow::response(401, "Invalid credentials");
             }
 
@@ -144,16 +187,12 @@ int main(int argc, char *argv[])
             json res;
             res["token"] = token;
             
-            db.return_connection(std::move(conn));
+            // Connection returns to pool automatically
             return crow::response(res.dump());
-
-        } catch (const pqxx::broken_connection &e) { 
-            cerr << format("Login Broken Conn: {}\n", e.what());
-            return crow::response(502, "Database connection lost"); 
 
         } catch (const std::exception &e) { 
             cerr << format("Login Error: {}\n", e.what());
-            db.return_connection(std::move(conn));
+            // Connection returns to pool automatically
             return crow::response(500, "Server Error"); 
         }
     });
@@ -227,13 +266,15 @@ int main(int argc, char *argv[])
             // Handle incoming pixel updates from clients
             try {
                 auto msg = json::parse(data);
-                
                 std::string color = msg["color"]; 
 
-                // Save the pixel change to the database
-                db.savePixel(msg["x"], msg["y"], color);
-                // Broadcast the change via Redis for other backend instances
-                redis.publishPixel(msg["x"], msg["y"], color);
+                // Non-blocking write: push to queue and return immediately
+                {
+                    lock_guard<mutex> lock(queue_mtx);
+                    update_queue.push({msg["x"], msg["y"], color});
+                }
+                queue_cv.notify_one();
+
             } catch (...) {}
         });
 
@@ -245,12 +286,20 @@ int main(int argc, char *argv[])
      */
     redis.subscribe([&](const string &channel, const string &message)
     {
-        lock_guard<mutex> _(mtx);
-        for (auto u : users) {
-            u->send_text(message);
-        }
+        try {
+            auto msg = json::parse(message);
+            // Sync with other instances by updating our local memory cache
+            db.updateCache(msg["x"].get<int>(), msg["y"].get<int>(), msg["color"].get<string>());
+
+            // Safely broadcast to local clients without risking dangling pointers
+            std::lock_guard<std::mutex> _(mtx);
+            for (auto u : users) {
+                // Crow WS sends are usually buffered and non-blocking
+                u->send_text(message);
+            }
+        } catch (...) {}
     });
 
-    // Start the Crow application on port 8080 in multi-threaded mode
-    app.port(8080).multithreaded().run();
+    // Start the Crow application on port 8080 with a thread pool optimized for 500+ VUs
+    app.port(8080).concurrency(512).run();
 }

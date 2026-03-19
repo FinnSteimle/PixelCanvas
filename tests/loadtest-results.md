@@ -1,39 +1,32 @@
 # Load Test Results
 
-## Run 1
-* **Status 200:** 100.00% (18,517 successes / 0 failures)
-* **Average Request Duration:** 7.42ms
-* **Max Request Duration:** 182.98ms
-* **p(95) Request Duration:** 13.87ms
-* **Total Requests:** 18,517
-* **Data Transferred:** 1.6 GB Received / 5.4 MB Sent
+Performance metrics for the PixelCanvas distributed system across different concurrency levels.
 
-## Run 2
-* **Status 200:** 100.00% (18,531 successes / 0 failures)
-* **Average Request Duration:** 7.28ms
-* **Max Request Duration:** 272.02ms
-* **p(95) Request Duration:** 13.22ms
-* **Total Requests:** 18,531
-* **Data Transferred:** 1.6 GB Received / 5.4 MB Sent
-
-## Run 3
-* **Status 200:** 100.00% (18,671 successes / 0 failures)
-* **Average Request Duration:** 6.51ms
-* **Max Request Duration:** 222.52ms
-* **p(95) Request Duration:** 11.8ms
-* **Total Requests:** 18,671
-* **Data Transferred:** 1.6 GB Received / 5.4 MB Sent
-
----
-
-### Comparison Summary
+## 100 Virtual Users (Baseline - 3 Runs)
 
 | Metric | Run 1 | Run 2 | Run 3 |
 | :--- | :--- | :--- | :--- |
-| **Success Rate** | 100.00% | 100.00% | 100.00% |
-| **Failures** | 0 | 0 | 0 |
-| **Total Requests** | 18,517 | 18,531 | 18,671 |
-| **Avg Duration** | 7.42ms | 7.28ms | 6.51ms |
-| **P95 Duration** | 13.87ms | 13.22ms | 11.8ms |
+| **Success Rate** | 100.00% | 99.98% | 99.98% |
+| **Failed Requests** | 0 | 1 | 1 |
+| **Total Requests** | 6,651 | 6,644 | 6,615 |
+| **Avg Latency** | 3.24ms | 3.45ms | 4.94ms |
+| **p95 Latency** | 6.75ms | 7.69ms | 13.33ms |
+| **Throughput** | 131.76 reqs/s | 131.48 reqs/s | 131.78 reqs/s |
+| **WS Messages** | 10,054 msgs/s | 10,058 msgs/s | 9,452 msgs/s |
 
-**Analysis Note:** Following the implementation of a thread-safe PostgreSQL connection pool with strict RAII transaction scoping, the system's stability has drastically improved. Across all three isolated load test runs, the cluster successfully processed an average of ~18,500 requests with a flawless 100% success rate (zero timeouts or dropped connections). The connection pool poisoning and cascading failure issues observed in previous iterations have been entirely resolved. This demonstrates true fault tolerance, graceful degradation, and consistent low-latency performance under maximum stress.
+## 500 Virtual Users (High Load)
+* **Success Rate:** 100.00%
+* **Requests:** 21,009
+* **Average Latency:** 39.25ms
+* **p95 Latency:** 110.87ms
+* **Throughput:** 416.3 reqs/s
+* **WebSocket Messages:** 95,400 msgs/s
+* **Network Traffic:** 1.9 GB (Received)
+
+## 1000 Virtual Users (Extreme Load)
+* **Success Rate:** 99.98%
+* **Requests:** 20,369
+* **Average Latency:** 116.9ms
+* **p95 Latency:** 442.57ms
+* **Throughput:** 402.6 reqs/s
+* **WebSocket Messages:** 74,685 msgs/s
