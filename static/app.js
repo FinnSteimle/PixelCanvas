@@ -9,6 +9,7 @@ const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
 const colorPicker = document.getElementById("colorPicker");
 const status = document.getElementById("status");
+const instanceIdDisplay = document.getElementById("instance-id");
 const authOverlay = document.getElementById("auth-overlay");
 const authStatus = document.getElementById("auth-status");
 const loginBtn = document.getElementById("loginBtn");
@@ -106,15 +107,24 @@ function connectWebSocket() {
       });
   };
 
-  // Handle incoming pixel updates from other users
+  // Handle incoming messages (pixel updates or backend identification)
   socket.onmessage = (event) => {
     const msg = JSON.parse(event.data);
+    
+    // Check if this is an identification message from the backend
+    if (msg.instanceId) {
+      instanceIdDisplay.innerText = msg.instanceId;
+      return;
+    }
+
+    // Otherwise, treat as a pixel update
     drawPixel(msg.x, msg.y, msg.color);
   };
 
   socket.onclose = (e) => {
     status.innerText = "● Offline - Reconnecting...";
     status.style.color = "orange";
+    instanceIdDisplay.innerText = "---";
 
     // If the backend closes the connection due to token issues, force a re-login
     if (

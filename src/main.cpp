@@ -53,6 +53,10 @@ bool verify_password(const string &hashed, const string &password)
 const char *env_secret = getenv("JWT_SECRET");
 const string JWT_SECRET = env_secret ? env_secret : "dev_fallback_secret_do_not_use_in_prod";
 
+// Load Instance ID for UI identification
+const char *env_instance = getenv("INSTANCE_ID");
+const string INSTANCE_ID = env_instance ? env_instance : "Unknown Node";
+
 // Struct to hold pixel data for the background queue
 struct PixelUpdate {
     int x, y;
@@ -252,8 +256,14 @@ int main(int argc, char *argv[])
         .onopen([&](crow::websocket::connection &conn)
         {
             // Add new connection to the active users set
-            std::lock_guard<std::mutex> _(mtx);
-            users.insert(&conn);
+            {
+                std::lock_guard<std::mutex> _(mtx);
+                users.insert(&conn);
+            }
+            // Send the instance ID to the client for UI identification
+            json msg;
+            msg["instanceId"] = INSTANCE_ID;
+            conn.send_text(msg.dump());
         })
         .onclose([&](crow::websocket::connection &conn, const string &reason, uint16_t status)
         {

@@ -14,9 +14,9 @@ The system uses a low-latency, "read-optimized" architecture designed to handle 
 ## Performance Benchmarks
 
 *   **Extreme Scalability:** 1,000 concurrent Virtual Users (VUs) with a 99.98% success rate.
-*   **Throughput:** 95,000+ pixel updates per second broadcasted via Redis with 1'000 concurrent VUs.
-*   **Low Latency:** 3.24ms - 4.94ms average request duration at baseline load (100 VUs).
-*   **Efficiency:** 1.9GB of real-time JSON traffic handled under extreme load (1'000 VUs).
+*   **Throughput:** 101,449+ pixel updates per second broadcasted via Redis with 1,000 concurrent VUs.
+*   **Low Latency:** 2.07ms - 5.12ms average request duration at baseline load (100 VUs).
+*   **Efficiency:** 2.2GB of real-time JSON traffic handled under high load (500 VUs).
 
 ## Features
 
