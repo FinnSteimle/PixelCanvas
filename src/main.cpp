@@ -180,17 +180,28 @@ int main(int argc, char *argv[])
                 return crow::response(401, "Invalid credentials");
             }
 
-            // Create a signed JWT valid for 24 hours
-            auto token = jwt::create()
+            // Create a short-lived access token (15 minutes)
+            auto access_token = jwt::create()
                 .set_issuer("pixel_canvas")
                 .set_type("JWS")
                 .set_payload_claim("username", jwt::claim(user))
-                .set_expires_at(chrono::system_clock::now() + chrono::days{1})
+                .set_payload_claim("type", jwt::claim(string("access")))
+                .set_expires_at(chrono::system_clock::now() + chrono::minutes{15})
+                .sign(jwt::algorithm::hs256{JWT_SECRET});
+
+            // Create a long-lived refresh token (7 days)
+            auto refresh_token = jwt::create()
+                .set_issuer("pixel_canvas")
+                .set_type("JWS")
+                .set_payload_claim("username", jwt::claim(user))
+                .set_payload_claim("type", jwt::claim(string("refresh")))
+                .set_expires_at(chrono::system_clock::now() + chrono::hours{24 * 7})
                 .sign(jwt::algorithm::hs256{JWT_SECRET});
 
             json res;
-            res["token"] = token;
-            
+            res["access_token"] = access_token;
+            res["refresh_token"] = refresh_token;
+
             // Connection returns to pool automatically
             return crow::response(res.dump());
 
@@ -198,6 +209,45 @@ int main(int argc, char *argv[])
             cerr << format("Login Error: {}\n", e.what());
             // Connection returns to pool automatically
             return crow::response(500, "Server Error"); 
+        }
+    });
+
+    /**
+     * Endpoint to refresh an expired access token.
+     * Requires a valid refresh token in the request body.
+     * Returns a new access token without requiring re-authentication.
+     */
+    CROW_ROUTE(app, "/refresh").methods(crow::HTTPMethod::POST)([&](const crow::request &req)
+    {
+        try {
+            auto data = json::parse(req.body);
+            string refresh_token = data["refresh_token"];
+
+            // Verify the refresh token
+            auto decoded = jwt::decode(refresh_token);
+            auto verifier = jwt::verify()
+                .allow_algorithm(jwt::algorithm::hs256{JWT_SECRET})
+                .with_issuer("pixel_canvas")
+                .with_claim("type", jwt::claim(string("refresh")));
+            verifier.verify(decoded);
+
+            // Extract username and issue a new access token
+            string user = decoded.get_payload_claim("username").as_string();
+
+            auto access_token = jwt::create()
+                .set_issuer("pixel_canvas")
+                .set_type("JWS")
+                .set_payload_claim("username", jwt::claim(user))
+                .set_payload_claim("type", jwt::claim(string("access")))
+                .set_expires_at(chrono::system_clock::now() + chrono::minutes{15})
+                .sign(jwt::algorithm::hs256{JWT_SECRET});
+
+            json res;
+            res["access_token"] = access_token;
+            return crow::response(res.dump());
+
+        } catch (...) {
+            return crow::response(401, "Invalid or expired refresh token");
         }
     });
 
@@ -214,12 +264,13 @@ int main(int argc, char *argv[])
 
         string token = auth_header.substr(7);
         try {
-            // Verify the JWT before allowing access
+            // Verify the JWT is a valid access token before allowing access
             auto decoded = jwt::decode(token);
             auto verifier = jwt::verify()
                 .allow_algorithm(jwt::algorithm::hs256{JWT_SECRET})
-                .with_issuer("pixel_canvas");
-            
+                .with_issuer("pixel_canvas")
+                .with_claim("type", jwt::claim(string("access")));
+
             verifier.verify(decoded);
             return crow::response(db.getFullCanvasJSON());
         } catch (...) {
@@ -245,8 +296,9 @@ int main(int argc, char *argv[])
                 auto decoded = jwt::decode(std::string(token_ptr));
                 auto verifier = jwt::verify()
                     .allow_algorithm(jwt::algorithm::hs256{JWT_SECRET})
-                    .with_issuer("pixel_canvas");
-                
+                    .with_issuer("pixel_canvas")
+                    .with_claim("type", jwt::claim(string("access")));
+
                 verifier.verify(decoded);
                 return true;
             } catch (...) {

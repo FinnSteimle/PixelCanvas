@@ -22,6 +22,6 @@ WORKDIR /app
 COPY . .
 
 # Adding the Release flag enables compiler optimizations (-O3) 
-RUN cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build
+RUN cmake -B build -S . -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
 
 CMD ["./build/pixel_server", "8080"]

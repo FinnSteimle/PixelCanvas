@@ -36,15 +36,16 @@ export function setup() {
   // 1. Register a new user
   const regRes = http.post(`${BASE_URL}/register`, payload, params);
 
-  // 2. Login to get the JWT token
+  // 2. Login to get access and refresh tokens
   const loginRes = http.post(`${BASE_URL}/login`, payload, params);
-  const token = loginRes.json("token");
+  const accessToken = loginRes.json("access_token");
+  const refreshToken = loginRes.json("refresh_token");
 
-  if (!token) {
+  if (!accessToken) {
     throw new Error("Setup failed: No token received. Aborting test.");
   }
 
-  return { token: token };
+  return { token: accessToken, refreshToken: refreshToken };
 }
 
 /**

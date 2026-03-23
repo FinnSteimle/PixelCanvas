@@ -30,6 +30,76 @@ function drawPixel(x, y, color) {
   ctx.fillRect(x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE);
 }
 
+// --- TOKEN MANAGEMENT ---
+
+function getAccessToken() {
+  return sessionStorage.getItem("pixel_access_token");
+}
+
+function getRefreshToken() {
+  return sessionStorage.getItem("pixel_refresh_token");
+}
+
+function storeTokens(accessToken, refreshToken) {
+  sessionStorage.setItem("pixel_access_token", accessToken);
+  if (refreshToken) {
+    sessionStorage.setItem("pixel_refresh_token", refreshToken);
+  }
+}
+
+function clearTokens() {
+  sessionStorage.removeItem("pixel_access_token");
+  sessionStorage.removeItem("pixel_refresh_token");
+}
+
+/**
+ * Attempts to refresh the access token using the stored refresh token.
+ * @returns {string|null} New access token, or null if refresh failed.
+ */
+async function refreshAccessToken() {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch("/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    storeTokens(data.access_token);
+    return data.access_token;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch wrapper that automatically retries with a refreshed access token on 401.
+ * @param {string} url The URL to fetch.
+ * @param {object} options Fetch options (headers will have Authorization injected).
+ * @returns {Response} The fetch response.
+ */
+async function authFetch(url, options = {}) {
+  const token = getAccessToken();
+  options.headers = { ...options.headers, Authorization: `Bearer ${token}` };
+
+  let res = await fetch(url, options);
+
+  if (res.status === 401) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      options.headers.Authorization = `Bearer ${newToken}`;
+      res = await fetch(url, options);
+    }
+  }
+
+  return res;
+}
+
 // --- AUTHENTICATION LOGIC ---
 /**
  * Handles user login or registration requests via REST API.
@@ -58,8 +128,8 @@ async function performAuth(endpoint) {
     if (response.ok) {
       if (endpoint === "login") {
         const data = await response.json();
-        // Store JWT in sessionStorage for subsequent requests
-        sessionStorage.setItem("pixel_token", data.token);
+        // Store both tokens in sessionStorage
+        storeTokens(data.access_token, data.refresh_token);
         // Hide overlay and start real-time sync
         authOverlay.style.display = "none";
         connectWebSocket();
@@ -82,8 +152,8 @@ async function performAuth(endpoint) {
  * Establishes a WebSocket connection for real-time pixel updates.
  * Verifies the JWT token and fetches the initial canvas state.
  */
-function connectWebSocket() {
-  const token = sessionStorage.getItem("pixel_token");
+async function connectWebSocket() {
+  let token = getAccessToken();
   if (!token) return;
 
   // We pass the token in the query string so the backend can verify it in the handshake
@@ -94,23 +164,25 @@ function connectWebSocket() {
     status.style.color = "lime";
 
     // Fetch the full canvas state from the database upon successful connection
-    fetch("/canvas", {
-      headers: { "Authorization": `Bearer ${token}` }
-    })
-      .then((res) => res.json())
+    authFetch("/canvas")
+      .then((res) => {
+        if (!res.ok) throw new Error("Canvas fetch failed");
+        return res.json();
+      })
       .then((data) => {
         // Clear canvas with white background
         ctx.fillStyle = "#FFFFFF";
         ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
         // Render all pixels from the database
         data.forEach((p) => drawPixel(p.x, p.y, p.color));
-      });
+      })
+      .catch(() => {});
   };
 
   // Handle incoming messages (pixel updates or backend identification)
   socket.onmessage = (event) => {
     const msg = JSON.parse(event.data);
-    
+
     // Check if this is an identification message from the backend
     if (msg.instanceId) {
       instanceIdDisplay.innerText = msg.instanceId;
@@ -121,22 +193,23 @@ function connectWebSocket() {
     drawPixel(msg.x, msg.y, msg.color);
   };
 
-  socket.onclose = (e) => {
+  socket.onclose = async (e) => {
     status.innerText = "● Offline - Reconnecting...";
     status.style.color = "orange";
     instanceIdDisplay.innerText = "---";
 
-    // If the backend closes the connection due to token issues, force a re-login
-    if (
-      e.reason.includes("Token") ||
-      e.reason.includes("Unauthorized") ||
-      e.code === 4001
-    ) {
-      sessionStorage.removeItem("pixel_token");
+    // Always try to refresh the access token before reconnecting,
+    // since the most common disconnect cause is token expiry.
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      setTimeout(connectWebSocket, 500);
+    } else if (getRefreshToken()) {
+      // Refresh token also expired — force re-login
+      clearTokens();
       authOverlay.style.display = "flex";
     } else {
-      // Automatic reconnection attempt after a short delay
-      setTimeout(connectWebSocket, 2000);
+      clearTokens();
+      authOverlay.style.display = "flex";
     }
   };
 }
@@ -147,9 +220,9 @@ function connectWebSocket() {
 loginBtn.onclick = () => performAuth("login");
 registerBtn.onclick = () => performAuth("register");
 
-// Log out by clearing the token and reloading the page
+// Log out by clearing the tokens and reloading the page
 logoutBtn.onclick = () => {
-  sessionStorage.removeItem("pixel_token");
+  clearTokens();
   location.reload();
 };
 
@@ -172,8 +245,8 @@ canvas.addEventListener("mousedown", (e) => {
 });
 
 // --- INITIALIZATION ---
-// Automatically log in if a valid token exists in sessionStorage
-if (sessionStorage.getItem("pixel_token")) {
+// Automatically connect if valid tokens exist in sessionStorage
+if (getAccessToken()) {
   authOverlay.style.display = "none";
   connectWebSocket();
 }
