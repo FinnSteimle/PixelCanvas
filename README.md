@@ -4,6 +4,20 @@ PixelCanvas is a real-time shared canvas inspired by r/place. Users log in and p
 
 ![Two browser windows on different backends painting on the same canvas while one backend restarts](docs/demo.gif)
 
+## How This Was Built
+
+Built as an individual task for the Distributed Systems module at OST (spring 2026).
+
+Most of the code was written with heavy AI assistance ("vibe coding"). My part was picking the architecture, writing and running the k6 load tests and fixing the issues they exposed.
+
+### Technology Choices
+
+- **PostgreSQL:** User accounts and the canvas have to survive restarts, and its upsert support (`INSERT … ON CONFLICT`) lets one query write a whole batch of pixels. I had also used it in earlier modules, and it's the de facto standard for relational databases.
+- **C++:** I took two C++ modules and wanted to see how well coding with AI works in a language where I know the theory.
+- **Redis:** Every backend has to see every pixel update right away. Redis Pub/Sub does that with very little setup. The AI suggested it, and my own research confirmed it's the standard tool for this.
+- **Nginx:** I needed a load balancer, and Nginx was one of the options the lecturer suggested. I picked it because I'd seen Nginx error pages on many websites and wanted to understand what Nginx actually does.
+- **HTML, CSS and vanilla JavaScript:** The UI only has to draw the canvas and send pixel updates, so a framework wasn't needed. Plain HTML, CSS and JavaScript were quick to build, and AI works very well with them.
+
 ## Architecture
 
 - **In-memory cache:** Each backend keeps the full canvas in memory, so reading the canvas never hits the database.
@@ -55,42 +69,6 @@ graph TB
     Queue2 -- "Publish pixel" --> Redis
     Redis -- "Subscribe<br/>canvas_updates" --> Crow1
     Redis -- "Subscribe<br/>canvas_updates" --> Crow2
-```
-
-### Auth Flow
-
-Login returns two JWTs (signed tokens the server can verify without a database lookup). The access token is valid for 15 minutes and is sent with every request. The refresh token is valid for 7 days and is only used to get a new access token.
-
-```mermaid
-sequenceDiagram
-    participant C as Browser
-    participant N as Nginx
-    participant B as Backend
-
-    C->>N: POST /login (username, password)
-    N->>B: Proxy request
-    B->>B: Verify credentials (Argon2)
-    B-->>C: {access_token (15m), refresh_token (7d)}
-
-    C->>N: GET /canvas (Bearer access_token)
-    N->>B: Proxy request
-    B->>B: Verify JWT (type: access)
-    B-->>C: Canvas data
-
-    Note over C: Access token expires
-
-    C->>N: GET /canvas (Bearer expired_token)
-    N->>B: Proxy request
-    B-->>C: 401 Unauthorized
-
-    C->>N: POST /refresh {refresh_token}
-    N->>B: Proxy request
-    B->>B: Verify JWT (type: refresh)
-    B-->>C: {access_token (15m)}
-
-    C->>N: GET /canvas (Bearer new_access_token)
-    N->>B: Proxy request
-    B-->>C: Canvas data (replayed request)
 ```
 
 ## Performance
@@ -149,6 +127,42 @@ You need Docker with Docker Compose.
 | `GET` | `/canvas` | Bearer (access) | Get the full 50x50 canvas as JSON |
 | `WS` | `/ws?token=<access_token>` | Query param | Real-time pixel updates. Send: `{ "x", "y", "color" }` |
 
+### Auth Flow
+
+Login returns two JWTs (signed tokens the server can verify without a database lookup). The access token is valid for 15 minutes and is sent with every request. The refresh token is valid for 7 days and is only used to get a new access token.
+
+```mermaid
+sequenceDiagram
+    participant C as Browser
+    participant N as Nginx
+    participant B as Backend
+
+    C->>N: POST /login (username, password)
+    N->>B: Proxy request
+    B->>B: Verify credentials (Argon2)
+    B-->>C: {access_token (15m), refresh_token (7d)}
+
+    C->>N: GET /canvas (Bearer access_token)
+    N->>B: Proxy request
+    B->>B: Verify JWT (type: access)
+    B-->>C: Canvas data
+
+    Note over C: Access token expires
+
+    C->>N: GET /canvas (Bearer expired_token)
+    N->>B: Proxy request
+    B-->>C: 401 Unauthorized
+
+    C->>N: POST /refresh {refresh_token}
+    N->>B: Proxy request
+    B->>B: Verify JWT (type: refresh)
+    B-->>C: {access_token (15m)}
+
+    C->>N: GET /canvas (Bearer new_access_token)
+    N->>B: Proxy request
+    B-->>C: Canvas data (replayed request)
+```
+
 ## Testing
 
 ### Load Test
@@ -175,17 +189,3 @@ The container names come from the folder name. If you cloned the repo into a dif
 - Password hashing uses libsodium's minimum Argon2 settings to keep load tests fast. Production would need the default settings.
 - The WebSocket token is passed as a query parameter, so it can show up in proxy logs.
 - There's no rate limiting on painting or login.
-
-## How This Was Built
-
-Built as an individual task for the Distributed Systems module at OST (spring 2026).
-
-Most of the code was written with heavy AI assistance ("vibe coding"). My part was picking the architecture, writing and running the k6 load tests and fixing the issues they exposed.
-
-### Technology Choices
-
-- **PostgreSQL:** User accounts and the canvas have to survive restarts, and its upsert support (`INSERT … ON CONFLICT`) lets one query write a whole batch of pixels. I had also used it in earlier modules, and it's the de facto standard for relational databases.
-- **C++:** I took two C++ modules and wanted to see how well coding with AI works in a language where I know the theory.
-- **Redis:** Every backend has to see every pixel update right away. Redis Pub/Sub does that with very little setup. The AI suggested it, and my own research confirmed it's the standard tool for this.
-- **Nginx:** I needed a load balancer, and Nginx was one of the options the lecturer suggested. I picked it because I'd seen Nginx error pages on many websites and wanted to understand what Nginx actually does.
-- **HTML, CSS and vanilla JavaScript:** The UI only has to draw the canvas and send pixel updates, so a framework wasn't needed. Plain HTML, CSS and JavaScript were quick to build, and AI works very well with them.
